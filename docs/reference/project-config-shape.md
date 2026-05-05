@@ -27,6 +27,12 @@ The JSON object crobot publishes to Cloudflare KV per project. The edge worker r
       "rules": [
         { "match_type": "contains", "url_pattern": "/products/" }
       ],
+      "audience": {
+        "all": [
+          { "fact": "device.type",  "op": "in", "value": ["mobile", "tablet"] },
+          { "fact": "geo.country",  "op": "in", "value": ["US", "CA"] }
+        ]
+      },
       "variations": [
         {
           "variation_id": 100,
@@ -79,6 +85,12 @@ Determines which JS bundle the worker serves. Drives drop-in compatibility.
 ### `tracking_domain`
 
 Optional. If present and the worker request's `Host` header matches `track.{tracking_domain}`, cookies are set with `Domain=.{tracking_domain}` (first-party). If absent, cookies fall back to `Domain=.testa.com` (third-party).
+
+### `audience`
+
+Optional. New in 4.0. Tree of `AudienceCondition` boolean rules over typed dimensions. Evaluated client-side by the pixel rule engine. If absent, the experiment matches every visitor (subject to `traffic_allocation`).
+
+Full schema in `docs/reference/audience-schema.md`. Backwards compat: legacy `targeting[]` shape (3.3.x/3.6) is honored when `audience` is missing.
 
 ### `traffic_allocation`
 

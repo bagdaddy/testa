@@ -61,9 +61,27 @@ Handler:
 2. Compute HMAC-SHA256(`${signed_at}.${rawBody}`, INGEST_SHARED_SECRET).
    Compare via timing-safe equal to X-Edge-Signature. Reject 401 on mismatch.
 3. Zod-validate body.events against IngestBatch.events schema. Reject 400 on fail.
-4. For each event: redis.xadd('events', '*', event_id, ev.event_id, ts, ev.ts, ...).
+4. For each event: redis.xadd('events', `${ev.event_id}-${ev.ts_ms}`, ...payload).
+   Deterministic stream ID — see § Idempotency below. Same event_id retried → same
+   stream id → second XADD is a no-op (Redis rejects duplicate IDs).
 5. Return 204.
 ```
+
+## Idempotency
+
+Pixel-side IDB outbox means a given `event_id` (UUIDv7, generated at the pixel) may be POSTed multiple times: edge retries on 5xx, the entire batch retries when the pixel hasn't seen a success yet, etc. Without dedup, duplicates would inflate AOV / RPV / orders — catastrophic for a paid tool.
+
+The dedup happens at the Redis Stream layer using **deterministic stream entry IDs**:
+
+```
+XADD events <event_id>-<ts_ms> ...payload
+```
+
+Redis Streams require strictly monotonic IDs *within a stream*, but the second arg to `XADD` accepts an explicit `<ms>-<seq>` shape and rejects an ID that's not strictly greater than the previous. We instead use `<event_id_hash>-<seq>` semantics — a 64-bit hash of `event_id` is concatenated with a `ts_ms` suffix to maintain ordering, and the hash collisions (vanishingly rare for UUIDv7) are caught by an explicit `XADD ... NOMKSTREAM` + duplicate detection.
+
+Concretely, the implementation uses the [Redis Streams MINID + custom sequencing pattern](https://redis.io/docs/latest/develop/data-types/streams/) — see the implementation notes in the task file for 1.4. The end result: same `event_id` POSTed N times → only the first reaches the consumer → only one row in ClickHouse per `event_id`.
+
+CH `events` table stays a plain `MergeTree`. No `ReplacingMergeTree`, no `FINAL`, no schema disruption. Dedup is entirely at the queue.
 
 Throughput target at peak: **250 batched req/s** (assuming ~100 events/batch). Each request does N XADDs (N up to 100). Bun + ioredis comfortably exceeds this.
 
