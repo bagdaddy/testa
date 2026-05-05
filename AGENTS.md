@@ -78,10 +78,53 @@ If `bun` isn't installed locally, `pnpm --filter @testa-platform/collector` comm
 **OK to do unattended:**
 
 - All work in feature branches.
+- **Pushing feature branches** to `origin` (`git push -u origin feat/<task-id>`).
+- **Opening DRAFT pull requests** via `gh pr create --draft`. Mark them ready-for-review only after the human's morning standup.
+- **Commenting on your own PRs** with progress notes / verification output / next steps.
 - Local `pnpm install`, `bun test`, `wrangler dev`, `docker compose up -d`.
 - Refactors that don't change observable behavior, with tests proving parity.
 - Bumping pinned dep versions in `package.json` if `pnpm install` succeeds and tests pass.
 - Adding tests, fixtures, docs.
+
+## Routine mode (nightly autonomous agent)
+
+A scheduled agent fires nightly at ~02:43 local. Its job is to chew through `tasks/phase-*/` files until it runs out of unblocked work, hits a guardrail, or burns its time/token budget.
+
+**Each cycle of the routine:**
+
+1. `cd ~/projects/testa-platform && git fetch origin && git checkout main && git pull --ff-only`
+2. Read `AGENTS.md` (this file) and `tasks/README.md`.
+3. Find the lowest-numbered `pending` task whose `blocked_by` is empty.
+4. `git checkout -b feat/<task-id>-<slug>` from `main`.
+5. Read the task file end-to-end before writing any code. Skim the docs it references.
+6. Implement against the acceptance criteria. Write tests as you go.
+7. `pnpm -r typecheck && pnpm -r test && pnpm lint` must pass before commit.
+8. Conventional commits, small. `feat(collector): 1.1 ...` for the headline change.
+9. `git push -u origin feat/<task-id>-<slug>`.
+10. `gh pr create --draft --title "feat(<scope>): <id> <subject>" --body "<task-body-summary + verification log + reviewer-checklist>"`.
+11. Update the task file frontmatter: `status: in_progress` → leave for the human to mark `done` upon merge.
+12. Update `tasks/README.md` status column to `in_progress`.
+13. Commit the doc updates ON THE SAME BRANCH (so the PR contains everything).
+14. Push.
+15. Loop to step 2 for the next task.
+
+**Stop conditions:**
+
+- No unblocked tasks left.
+- A task's acceptance criteria can't be met without human input → log a comment on the most-recent PR + add a `tasks/blockers/<date>-<slug>.md` note + stop.
+- Tests fail and you cannot fix them in <30 min of effort → push the WIP commit, leave the PR draft with a clear `[BLOCKED: <reason>]` PR title, stop.
+- Token / time budget exhausted.
+
+**Each routine run posts a summary** to the most-recent PR (or to `tasks/RUN_LOG.md`):
+
+```
+## Run YYYY-MM-DD 02:43
+- Picked up: [1.1, 1.3, 1.2]
+- Completed (drafts): [#42, #43, #44]
+- Blocked: [1.4 — needs INGEST_SHARED_SECRET set in CI; left for human]
+- Token usage: ~ XXk
+- Next pickup: 1.5
+```
 
 ## When you finish a task
 

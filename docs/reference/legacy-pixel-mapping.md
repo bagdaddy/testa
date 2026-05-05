@@ -96,6 +96,8 @@ The `_testa_uuid` change is the load-bearing one for ITP defeat.
 
 4.0 module: `runtime/experiments/cross_domain.ts`. Preserve the encoding format exactly so 3.6 and 4.0 sites can interoperate during the rollout window.
 
+> **Known production issue.** See `docs/KNOWN_ISSUES.md` (entry dated 2026-05-05). Some Next.js / SPA destinations strip the `_testa_cd` query param during client-side navigation, breaking the bridge. The v1 port is 1:1 (issue preserved). A more robust transport (postMessage iframe, hash fragment, or worker-bridged exchange) ships as a follow-up PR after pilot is stable. Do NOT try to fix this in Phase 3.7's port — track the parity test, file the issue, move on.
+
 ## Behaviors NOT to copy
 
 The following 3.6 behaviors are explicitly NOT carried into 4.0:
