@@ -3,10 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "description": "Testa frontend tracker + edge worker + event collector",
-  "packageManager": "pnpm@9.12.0",
+  "packageManager": "pnpm@10.28.2",
   "engines": {
     "node": ">=22",
-    "pnpm": ">=9"
+    "pnpm": ">=10"
   },
   "scripts": {
     "build": "turbo run build",
