@@ -22,13 +22,7 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"],
-      "inputs": [
-        "src/**/*.ts",
-        "src/**/*.tsx",
-        "**/*.test.ts",
-        "**/*.spec.ts",
-        "vitest.config.ts"
-      ]
+      "inputs": ["src/**/*.ts", "src/**/*.tsx", "**/*.test.ts", "**/*.spec.ts", "vitest.config.ts"]
     },
     "test:e2e": {
       "dependsOn": ["build"],

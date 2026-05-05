@@ -34,16 +34,18 @@ app.get('/projects/:slug{.+\\.js}', (c) => {
   });
 });
 
-app.options('/track', (c) =>
-  new Response(null, {
-    status: 204,
-    headers: {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'POST, OPTIONS',
-      'access-control-allow-headers': 'content-type',
-      'access-control-max-age': '86400',
-    },
-  }),
+app.options(
+  '/track',
+  () =>
+    new Response(null, {
+      status: 204,
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'POST, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+        'access-control-max-age': '86400',
+      },
+    }),
 );
 
 app.post('/track', (c) => {
@@ -57,9 +59,6 @@ export default app;
  * Durable Object stub — implemented in Phase 2.5.
  */
 export class BatchBuffer implements DurableObject {
-  // biome-ignore lint/suspicious/noEmptyBlockStatements: stub
-  constructor(_state: DurableObjectState, _env: Env) {}
-
   async fetch(_request: Request): Promise<Response> {
     return new Response('not implemented', { status: 501 });
   }
