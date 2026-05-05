@@ -20,7 +20,7 @@ Foundation work was done in the seed commits before this task system existed. Se
 
 | ID | Task | Status | Blocked by |
 |---|---|---|---|
-| [1.1](./phase-1/1.1-clickhouse-schema-files.md) | ClickHouse schema files | pending | — |
+| [1.1](./phase-1/1.1-clickhouse-schema-files.md) | ClickHouse schema files | in_progress | — |
 | [1.2](./phase-1/1.2-migration-runner.md) | CH migration runner CLI | pending | 1.1 |
 | [1.3](./phase-1/1.3-clickhouse-singleton.md) | `@clickhouse/client` singleton | pending | — |
 | [1.4](./phase-1/1.4-ingest-route.md) | `POST /_ingest` route + HMAC + Zod | pending | 1.3 |

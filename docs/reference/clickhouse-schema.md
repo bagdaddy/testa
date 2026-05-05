@@ -64,6 +64,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_aov_daily
 ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(day)
 ORDER BY (project_id, experiment_id, variation_id, currency, day)
+SETTINGS allow_nullable_key = 1
 AS
 SELECT
     toDate(ts)              AS day,
@@ -102,6 +103,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_rpv_revenue_daily
 ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(day)
 ORDER BY (project_id, experiment_id, variation_id, currency, day)
+SETTINGS allow_nullable_key = 1
 AS
 SELECT
     toDate(ts)        AS day,
@@ -122,6 +124,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_rpv_visitors_daily
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(day)
 ORDER BY (project_id, experiment_id, variation_id, day)
+SETTINGS allow_nullable_key = 1
 AS
 SELECT
     toDate(ts)              AS day,
@@ -143,6 +146,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_sessions_daily
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(day)
 ORDER BY (project_id, experiment_id, variation_id, day)
+SETTINGS allow_nullable_key = 1
 AS
 SELECT
     toDate(ts)                                         AS day,
@@ -166,6 +170,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_experiment_summary
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(day)
 ORDER BY (project_id, experiment_id, variation_id, day)
+SETTINGS allow_nullable_key = 1
 AS
 SELECT
     toDate(ts)                  AS day,
@@ -225,6 +230,7 @@ ORDER BY filename;
 - **`LowCardinality` everywhere we can.** `event_name`, `country`, `device_type`, etc. — dictionary-encoded, tiny on disk.
 - **`Decimal(18, 4)` for revenue** — never floats for money.
 - **`Map(LowCardinality(String), String)` for `props`** — keys are LowCardinality (the worker normalizes to a small set), values stored as strings (cast at query time).
+- **`SETTINGS allow_nullable_key = 1` on all 5 materialized views.** Their `ORDER BY` clauses include `experiment_id` and `variation_id`, both `Nullable(UInt64)` (inherited from `events`). ClickHouse 24.x rejects nullable sort keys without this setting. Keeping the columns nullable preserves the semantic distinction between "no experiment context" (NULL) and "experiment with id 0" — never bucket those together. Verified against CH 24.10 in 2026-05-06 smoke test.
 
 ## Storage estimate
 
