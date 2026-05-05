@@ -93,19 +93,29 @@ If 4.0 causes a regression:
 
 No customer needs to change HTML. No DNS changes. No deploy.
 
-## Tracked follow-ups (post-pilot, NOT v1)
+## In scope (where earlier drafts of this doc deferred to v2 / post-pilot)
 
-- **Redirect handling rework.** Existing 3.6 has known issues; tracker 4.0 ships them unchanged for parity. Open a tracking issue once 4.0 is stable on the pilot project; design pass + new Playwright cases.
-- **Copy-test improvements.** Same posture. Ships unchanged in 4.0; rework after rollout.
-- Both must wait until Phase 6 success criteria are met. Otherwise we can't tell whether a regression came from "the rewrite" or "new behavior".
+These were considered for "later" in earlier drafts; subsequent architecture grilling pulled them forward into the current redesign because shipping without them would put us behind VWO/ABTasty out of the gate.
 
-## Out of scope for v1
+- **Redirect engine rework.** State-of-the-art. SPA + Next.js compatibility, query-param fidelity, loop guard, cross-domain visitor stitching. Specifics in `docs/architecture/01-tracker.md` § Redirect engine. Repro harness across Next 12/13/14 and react-router-dom 6 lands with the engine.
+- **Audience targeting upgrade.** Tier 1 + Tier 2 dimensions (geo, device, browser, OS, language, time, referrer, query param, cookie, isReturning, dataLayer, custom JS) under a nestable `all`/`any`/`not` JSON schema. See `docs/reference/audience-schema.md`. Sandboxed expression language for `visitor.custom`; no real `eval`.
+- **IndexedDB-backed event outbox + `_pixel_health` observability.** Durable retry queue, force-flush on pagehide, deterministic Redis stream IDs for idempotency. Specifics in `docs/architecture/01-tracker.md` § Event delivery and `docs/architecture/02-collector.md` § Idempotency.
+- **`window.Analytica.*` legacy global surface.** Frozen API for drop-in compat with 3.x customers. See `docs/reference/legacy-pixel-mapping.md`.
 
-- Experiment variation **assignment at the edge** (KV-driven `/api/leads` replacement). v2.
-- ClickHouse replication / HA. Single node v1 is enough.
+## Tracked follow-ups (truly post-pilot)
+
+- **Copy-test improvements.** 4.0 ships the 1:1-port behavior; rework after rollout once we have a pilot's worth of regression data.
+- **Migrating away from `leads` / `lead_completed_goals`.** They stay in v1; CH coexists.
+
+## Optional / premium offerings
+
+- **CNAME-edge integration.** Customers who CNAME their tracking domain to our worker get zero-flicker first-pageload behavior (worker decides redirect/audience inline, returns sync redirect JS). This is opt-in, marketed as a premium tier; default integration is the JS pixel and customers' own origins. Default integration uses the worker only as a thin gateway.
+
+## Out of scope for this redesign
+
+- ClickHouse replication / HA. Single node is enough today; revisit when traffic dictates.
 - Customer-configurable retention. Whole-table TTL only.
-- Edge personalization (server-rendered variations). v3.
-- Migrating away from `leads` / `lead_completed_goals`. They stay forever in v1.
+- Edge personalization (server-rendered variations). Different product.
 - Generic web-analytics product surface (pageviews UI without an experiment context).
 - Cloudflare Bot Management paid feature. Free signals + heuristics only.
 - Pulling testa-agent or testa-marketing-web into the new monorepo.

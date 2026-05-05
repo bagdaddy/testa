@@ -52,14 +52,17 @@ These get first-class metric support (the materialized views below).
 
 | Name | Required props | Use |
 |---|---|---|
-| `page_view` | url | Bounce, pages/session, traffic |
+| `page_view` | url | Bounce, pages/session, traffic. Re-fires on SPA route changes. |
 | `session_start` | (auto-emitted) | Sessions count |
-| `experiment_view` | experiment_id, variation_id | Experiment exposure |
+| `experiment_view` | experiment_id, variation_id | Experiment exposure. Re-fires on SPA route change to a different experiment. |
 | `purchase` | value_native, currency, order_id, [items_count] | AOV, RPV, total revenue |
 | `add_to_cart` | (optional value_native+currency) | Add-to-cart funnel step |
 | `checkout_start` | (optional value_native+currency) | Checkout abandonment funnel step |
+| `_pixel_health` | (queued/sent/dropped/retried/oldest_age in props) | Pixel-side delivery health; dashboarded for drop-rate alerts |
 
 Anything else is a generic event keyed on `event_name`. Custom goals continue to map to the existing crobot `Goal` model (binary conversion in MySQL); rich revenue/funnel work uses CH events.
+
+`_pixel_health` is filtered out of all 7 materialized views (none of them match `event_name = '_pixel_health'`). It exists only in the raw `events` table for observability queries.
 
 ## Buffer table
 
@@ -137,6 +140,20 @@ LAYOUT(COMPLEX_KEY_HASHED());
 ```
 
 Daily Frankfurter pull populates the source endpoint. Queries convert via `dictGet('fx_rates', 'rate', tuple(toDateTime(day), currency, report_currency))`.
+
+## Idempotency / dedup
+
+Same-`event_id` duplicates (from pixel IDB-outbox retries, edge retries, consumer restart races) are deduped at the Redis Stream layer via deterministic stream entry IDs — same `event_id` → same stream ID → second `XADD` is a no-op. CH never sees the dup. See `docs/architecture/02-collector.md` § Idempotency.
+
+The `events` table stays a plain `MergeTree`. No `ReplacingMergeTree`, no `FINAL`. Query patterns are standard.
+
+## Late arrivals
+
+Events from the pixel IDB outbox can arrive hours or days after their `ts`. Behavior:
+
+- **Raw `events` table:** correct. Late events partition by `toYYYYMM(ts)` so they land in the right month even when ingested much later.
+- **Materialized views:** computed on insert. A 3-day-late `purchase` does insert into the day's MV row, but if a customer queried the dashboard between the original day and the late arrival, they saw a slightly low number. Documented as "best-effort, MV stable after 24 hours."
+- **Backfill:** not implemented. If we ever observe customers materially affected, we add a "MV refresh" path keyed on `ingested_at - ts > N`.
 
 ## Retention
 

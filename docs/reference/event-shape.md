@@ -14,7 +14,7 @@ All three are kept in lockstep via `packages/shared-types/src/event.ts`. If you 
 
 ```ts
 interface PixelEvent {
-  event_id: string;          // UUID v4, generated client-side per event
+  event_id: string;          // UUIDv7, generated client-side per event, persisted in IDB outbox
   event_name: EventName;     // reserved or custom; validated at edge
   ts: number;                // Unix ms, client clock at fire time
   project_id: number;
@@ -35,7 +35,7 @@ interface PixelEvent {
 }
 ```
 
-Reserved event names: `page_view`, `session_start`, `experiment_view`, `purchase`, `add_to_cart`, `checkout_start`. Anything else is custom — it lands as a generic event keyed on `event_name`.
+Reserved event names: `page_view`, `session_start`, `experiment_view`, `purchase`, `add_to_cart`, `checkout_start`, `_pixel_health`. Anything else is custom — it lands as a generic event keyed on `event_name`.
 
 ### Required-by-event-name
 
@@ -47,9 +47,14 @@ Reserved event names: `page_view`, `session_start`, `experiment_view`, `purchase
 | `purchase` | value_native, currency, order_id |
 | `add_to_cart` | (optional value/currency) |
 | `checkout_start` | (optional value/currency) |
+| `_pixel_health` | (props with `queued`, `sent`, `dropped`, `retried`, `oldest_age_ms` numerics) |
 | custom | event_name + (anything in props) |
 
 The edge worker rejects events that fail their per-name required check (400).
+
+### Idempotency
+
+`event_id` is a UUIDv7 generated at the pixel and persisted in the IndexedDB outbox. The same event may be POSTed multiple times (pixel retry, edge retry); same `event_id` deduplicates at the Redis Stream layer in the collector — see `docs/architecture/02-collector.md` § Idempotency.
 
 ## 2. EnrichedEvent — edge → collector
 
