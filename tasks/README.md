@@ -20,9 +20,9 @@ Foundation work was done in the seed commits before this task system existed. Se
 
 | ID | Task | Status | Blocked by |
 |---|---|---|---|
-| [1.1](./phase-1/1.1-clickhouse-schema-files.md) | ClickHouse schema files | in_progress | — |
+| [1.1](./phase-1/1.1-clickhouse-schema-files.md) | ClickHouse schema files | done | — |
 | [1.2](./phase-1/1.2-migration-runner.md) | CH migration runner CLI | pending | 1.1 |
-| [1.3](./phase-1/1.3-clickhouse-singleton.md) | `@clickhouse/client` singleton | in_progress | — |
+| [1.3](./phase-1/1.3-clickhouse-singleton.md) | `@clickhouse/client` singleton | done | — |
 | [1.4](./phase-1/1.4-ingest-route.md) | `POST /_ingest` route + HMAC + Zod | pending | 1.3 |
 | [1.5](./phase-1/1.5-consumer-worker.md) | Consumer worker (XREADGROUP → CH INSERT) | pending | 1.1, 1.2, 1.3 |
 | [1.6](./phase-1/1.6-fx-rates.md) | FX rates sync + dictionary endpoint | pending | 1.3 |
