@@ -1,0 +1,27 @@
+{
+  "name": "@testa-platform/collector",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bun + Hono ingest API + ClickHouse consumer + read API for aggregated metrics",
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=bun --outdir=dist --sourcemap=external && bun build ./src/consumer/main.ts --target=bun --outdir=dist --sourcemap=external",
+    "dev:server": "bun run --hot src/index.ts",
+    "dev:consumer": "bun run --hot src/consumer/main.ts",
+    "migrate": "bun run src/db/migrate.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo coverage"
+  },
+  "dependencies": {
+    "@clickhouse/client": "1.8.1",
+    "hono": "4.6.10",
+    "ioredis": "5.4.1",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@testa-platform/shared-types": "workspace:*",
+    "@types/bun": "1.1.13",
+    "typescript": "5.6.3"
+  }
+}

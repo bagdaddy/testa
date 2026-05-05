@@ -1,0 +1,46 @@
+name = "testa-edge"
+main = "src/index.ts"
+compatibility_date = "2024-11-12"
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespaces are bound per-environment. The IDs below are placeholders;
+# real KV namespaces are created via `wrangler kv namespace create` and
+# the IDs filled in. Do NOT commit production IDs here.
+[[kv_namespaces]]
+binding = "KV_PROJECT_CONFIG"
+id = "PLACEHOLDER_PROJECT_CONFIG"
+preview_id = "PLACEHOLDER_PROJECT_CONFIG_PREVIEW"
+
+[[kv_namespaces]]
+binding = "KV_INTEGRATION_BUNDLES"
+id = "PLACEHOLDER_BUNDLES"
+preview_id = "PLACEHOLDER_BUNDLES_PREVIEW"
+
+# Durable Object for the batch buffer (Phase 2.5).
+[[durable_objects.bindings]]
+name = "BATCH_BUFFER"
+class_name = "BatchBuffer"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["BatchBuffer"]
+
+# Secrets (set via `wrangler secret put`):
+#   INGEST_SHARED_SECRET   - HMAC key shared with collector
+#   INGEST_ORIGIN_URL      - collector base URL, e.g. https://collector.testa.internal
+#   COOKIE_FALLBACK_DOMAIN - shared-domain fallback, e.g. .testa.com
+#   VISITOR_ID_SALT        - daily-rotated salt prefix for denied-consent hashing
+
+[vars]
+ENVIRONMENT = "development"
+
+[observability]
+enabled = true
+
+[env.staging]
+name = "testa-edge-staging"
+vars = { ENVIRONMENT = "staging" }
+
+[env.production]
+name = "testa-edge"
+vars = { ENVIRONMENT = "production" }

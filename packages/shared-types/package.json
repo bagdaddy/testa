@@ -1,0 +1,38 @@
+{
+  "name": "@testa-platform/shared-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./event": {
+      "types": "./src/event.ts",
+      "default": "./src/event.ts"
+    },
+    "./project-config": {
+      "types": "./src/project-config.ts",
+      "default": "./src/project-config.ts"
+    },
+    "./metric-summary": {
+      "types": "./src/metric-summary.ts",
+      "default": "./src/metric-summary.ts"
+    },
+    "./consent": {
+      "types": "./src/consent.ts",
+      "default": "./src/consent.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"shared-types is type-only, no tests\" && exit 0",
+    "clean": "rm -rf .turbo *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  }
+}
