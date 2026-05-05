@@ -1,8 +1,8 @@
-import { build, context } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build, context } from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
