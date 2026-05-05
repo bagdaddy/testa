@@ -44,7 +44,25 @@ Foundation work was done in the seed commits before this task system existed. Se
 
 ## Phase 3 — Tracker pixel 4.0
 
-To be scoped — first task file authored when Phase 2.1 lands (the agent may author Phase 3 task files itself when it runs out of unblocked Phase 1/2 work; see "Authoring future-phase tasks" below).
+| ID | Task | Status | Blocked by |
+|---|---|---|---|
+| [3.1](./phase-3/3.1-loader-stub.md) | Loader stub + queue + monkey-patch installer | pending | — |
+| [3.2](./phase-3/3.2-runtime-entry.md) | Runtime entry + queue hydration + `_testa.load()` | pending | 3.1 |
+| [3.3](./phase-3/3.3-cookies-module.md) | Cookie module (5 cookies) | pending | — |
+| [3.4](./phase-3/3.4-consent-state-machine.md) | Consent state machine + CMP integration | pending | — |
+| [3.5](./phase-3/3.5-spa-navigation.md) | SPA navigation (patch consumer + canonical URL diff) | pending | 3.1 |
+| [3.6](./phase-3/3.6-idb-outbox-transport.md) | IDB outbox + transport + retry + `_pixel_health` | pending | 3.4 |
+| [3.7](./phase-3/3.7-audience-rule-engine.md) | Audience rule engine + sandboxed JS evaluator + legacy compat | pending | — |
+| [3.8](./phase-3/3.8-traffic-assignment.md) | Variation traffic assignment (consistent-hash) | pending | 3.3 |
+| [3.9](./phase-3/3.9-variation-apply.md) | Variation apply (CSS / HTML / text / attr / JS) | pending | 3.8 |
+| [3.10](./phase-3/3.10-redirect-engine.md) | Redirect engine (decide + execute + loop guard + cross-domain + SPA) | pending | 3.7, 3.8 |
+| [3.11](./phase-3/3.11-spa-redirect-harness.md) | SPA redirect repro harness (Next 12/13/14, RR6, plain JS) | pending | 3.10 |
+| [3.12](./phase-3/3.12-legacy-globals-compat.md) | `window.Analytica.*` legacy globals + eventEmitter | pending | 3.2, 3.3, 3.8 |
+| [3.13](./phase-3/3.13-legacy-http-calls.md) | Legacy HTTP calls (`/api/leads`, `/api/leads/convert`, `/api/pixel`) | pending | 3.12 |
+| [3.14](./phase-3/3.14-bundle-build.md) | esbuild loader + runtime, content-hashed runtime URL | pending | 3.1, 3.2 |
+| [3.15](./phase-3/3.15-test-coverage.md) | Vitest coverage + Playwright golden flows | pending | 3.1–3.13 |
+
+The Phase 3 corpus reflects the 2026-05-06 grilling decisions: anti-flicker is the customer's SmartCode's job (no shielding in 3.x); redirect engine is state-of-the-art and pulled forward (no 1:1 port of 3.6 redirect bugs); audience targeting uses the new `AudienceCondition` schema (`docs/reference/audience-schema.md`); event delivery uses an IndexedDB outbox + UUIDv7 + deterministic Redis stream IDs for dedup; `window.Analytica.*` is a frozen API surface (`docs/reference/legacy-globals-inventory.md`).
 
 ## Phase 4 — Collector read API
 
