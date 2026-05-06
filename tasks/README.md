@@ -32,11 +32,11 @@ Foundation work was done in the seed commits before this task system existed. Se
 
 | ID | Task | Status | Blocked by |
 |---|---|---|---|
-| [2.1](./phase-2/2.1-hono-router.md) | Hono router skeleton (routes wired) | pending | — |
+| [2.1](./phase-2/2.1-hono-router.md) | Hono router skeleton (routes wired) | done | — |
 | [2.2](./phase-2/2.2-cookies.md) | First-party cookie module | pending | — |
 | [2.3](./phase-2/2.3-enrich.md) | Geo + UA enrichment | pending | — |
 | [2.4](./phase-2/2.4-bot-filter.md) | Bot heuristics (free signals) | pending | 2.3 |
-| [2.5](./phase-2/2.5-batch-buffer-do.md) | DurableObject batch buffer | pending | — |
+| [2.5](./phase-2/2.5-batch-buffer-do.md) | DurableObject batch buffer | done | — |
 | [2.6](./phase-2/2.6-ingest-forward.md) | HMAC sign + POST to collector | pending | 2.5 |
 | [2.7](./phase-2/2.7-serve-pixel.md) | GET /projects/:slug.js — KV serve | pending | — |
 | [2.8](./phase-2/2.8-tests.md) | miniflare + Vitest coverage | pending | 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7 |
