@@ -1,0 +1,31 @@
+flowchart LR
+  classDef c1 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+  classDef c2 fill:#fff3e0,stroke:#e65100,stroke-width:2px
+  classDef c3 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+  classDef c4 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+
+  CUST[Customer site<br/>SmartCode + Pixel]
+  EDGE[Per-customer<br/>Edge Worker<br/>CF]
+  COL[Collector<br/>Bun + Hono]
+  REDIS[(Redis<br/>stream + dedup)]
+  CN[Consumer<br/>Bun process]
+  CH[(ClickHouse<br/>events + 5 MVs)]
+  CROBOT[Crobot<br/>Laravel + MySQL<br/>testa-admin]
+  VUE[Vue dashboards]
+
+  CUST --> EDGE
+  EDGE --> COL
+  COL --> REDIS
+  REDIS --> CN
+  CN --> CH
+  CROBOT -. publish KV .-> EDGE
+  CROBOT -. provision .-> EDGE
+  VUE --> CROBOT
+  CROBOT -. proxy .-> COL
+  COL -. read .-> CH
+  CUST -. legacy /api/leads .-> CROBOT
+
+  class CUST c1
+  class EDGE c2
+  class COL,REDIS,CN,CH c3
+  class CROBOT,VUE c4

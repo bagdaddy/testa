@@ -1,0 +1,21 @@
+flowchart LR
+  classDef pixel fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+  classDef edge fill:#fff3e0,stroke:#e65100,stroke-width:2px
+  classDef plat fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+
+  P[Pixel] -->|enqueue| IDB[(IDB outbox<br/>UUIDv7)]
+  IDB -->|fetch keepalive| EDGE[Edge worker]
+  EDGE -->|enrich + bot filter| DO[BatchBuffer DO<br/>50 events / 500ms]
+  DO -->|HMAC-signed batch| COL[Collector /_ingest]
+  COL -->|verify HMAC<br/>+ Zod| CHK{event_name<br/>in dedup<br/>list?}
+  CHK -- yes --> SET[SETNX 10min]
+  CHK -- no --> XADD[XADD events *]
+  SET -- new --> XADD
+  SET -- duplicate --> SKIP[skip / log]
+  XADD --> RD[(Redis stream)]
+  RD --> CN[Consumer XREADGROUP]
+  CN -->|JSONEachRow INSERT| CH[(ClickHouse<br/>events_buffer → events)]
+
+  class P,IDB pixel
+  class EDGE,DO edge
+  class COL,CHK,SET,XADD,SKIP,RD,CN,CH plat

@@ -16,6 +16,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck",
+    "diagrams": "for f in docs/architecture/diagrams/*.mmd; do npx -p @mermaid-js/mermaid-cli mmdc -i \"$f\" -o \"${f%.mmd}.svg\" -b transparent; done",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
