@@ -4,6 +4,87 @@ Routine / agent session log. Most recent at top. Each entry: what was picked up,
 
 ---
 
+## 2026-05-06 (Wed) — late, after second grilling session + autonomous continuation
+
+### What happened
+
+User returned and asked to be grilled on the remaining open architectural questions. Six grilling questions resolved in sequence (Q6–Q11), all captured to project memory. Then user authorized merging the in-flight batch and asked agent to continue autonomously.
+
+### Six grilling decisions reached this session (saved to memory)
+
+| Q | Topic | Decision |
+|---|---|---|
+| Q6 | Events-table schema gaps | Add viewport_w/h, tracker_version, utm_*, region_subdivision, city. Rename ts→client_ts, ingested_at→server_ts. No raw IP. |
+| Q7 | Code style (8 sub-decisions) | Plain throw + try/catch; console.* in pixel/edge, pino in collector; functional DI with `__setForTests`; immutable in domain code; Zod at edge+collector only; functions over classes; vitest+bun:test; **400 LOC max per TS file** (stricter than global). |
+| Q8 | Variation bucketing | Deterministic xxhash32 with frozen `seed=0xABCDEF`. User's rationale: Math.random() causes SRM drift that confuses mid-level specialists. |
+| Q9 | Event dedup mechanism | SETNX-before-XADD with 10-min TTL, applied to a configurable allow-list `INGEST_DEDUP_EVENT_NAMES`. Replaces the (incorrect) "deterministic stream IDs" sketch from earlier docs. |
+| Q10 | Frequency cap + mutex groups | Both ship: per-experiment `frequency_cap: { max, window }` and `mutex_group: string`. Cookie-persisted. Hold-out groups deferred. |
+| Q11 | Multi-tenancy / rate limits | **No technical rate limiting.** Per-customer worker deployment provides isolation (CF auto-scales independently); crobot's monthly lead quota is the only cap. Collector keeps a circuit breaker for catastrophic protection of shared infra. |
+
+Memory pointers in `~/.claude/projects/.../memory/MEMORY.md`. Each decision has its own `architecture_*.md` file.
+
+### Merged into main this session (7 PRs, fast-forward)
+
+Earlier session's 6 PRs landed first, then `chore/post-merge-status-batch-2`:
+
+| PR | Tip on main |
+|---|---|
+| `chore/post-merge-task-status` (1.1+1.3 done markers) | `c1018b7` |
+| `docs/legacy-globals-inventory` (full window.Analytica.* surface) | `7c907eb` |
+| `docs/phase-3-task-corpus` (15 Phase 3 task files) | `5ce0422` |
+| `feat/2.1-hono-router` (route split) | `5ce762d` |
+| `feat/2.5-batch-buffer-do` (DurableObject batch buffer) | `1da206b` |
+| `chore/run-log-update-2` | `74a5f71` |
+| `chore/post-merge-status-batch-2` (2.1+2.5 done markers) | `c1246d0` |
+
+Total in main: 13 commits. main is at `c1246d0`.
+
+### Pushed for review (3 PRs, awaiting morning testing)
+
+These are NOT merged. User said "I will test everything tomorrow" before continuing — new work goes through PR review.
+
+| Branch | What | PR URL |
+|---|---|---|
+| `feat/events-schema-extensions` | Implements Q6 schema decision: rename ts→client_ts, ingested_at→server_ts; add viewport/tracker_version/utm_*/region_subdivision/city to `events` + 5 MVs + shared-types `PixelEvent`/`EnrichedEvent`. Smoke-tested live against CH 24.10. | https://github.com/bagdaddy/testa/pull/new/feat/events-schema-extensions |
+| `docs/capture-remaining-grilling` | Updates 02-collector.md + 03-data-model.md (SETNX-before-XADD, replaces wrong "deterministic stream IDs"); 05-rollout.md + 01-tracker.md (per-customer workers, no rate limiting); legacy-globals-inventory.md (adds `_testa_freq_*`, `_testa_mutex_*`, freq/mutex globals); project-config-shape.md (adds `frequency_cap`, `mutex_group`, xxhash32 bucketing rationale). | https://github.com/bagdaddy/testa/pull/new/docs/capture-remaining-grilling |
+| `docs/task-file-corrections` | Updates Phase 1.4 task file (Zod schema with new fields, SETNX-before-XADD pattern, ingest tests for dedup) and Phase 3.8 task file (xxhash32 with SRM rationale, removes "must match 3.6 hash" constraint since 3.6 uses Math.random). | https://github.com/bagdaddy/testa/pull/new/docs/task-file-corrections |
+
+### Verification per PR
+
+- `pnpm -r typecheck`: ✓ on `feat/events-schema-extensions` and `docs/*`
+- `pnpm lint`: ✓ on all
+- `pnpm --filter @testa-platform/edge test`: ✓ 14 passed (event fixture updated to new field names)
+- Live ClickHouse 24.10: 9 migrations apply on fresh DB; INSERT propagates to MV ✓
+- `pnpm --filter @testa-platform/collector test`: ⚠️ NOT RUN (bun missing on dev box — same blocker as before)
+
+### Remaining open queue (for next session)
+
+- **Phase 4** (collector read API: `/api/v1/metrics/{aov,rpv,sessions,...}`) — corpus needs scoping. Welch's t-test + bootstrap CIs decisions not yet captured.
+- **Phase 5** (crobot integration) — needs context I don't have at hand on testa-admin / Filament forms; user-driven.
+- **Phase 6** (per-customer worker provisioning) — new phase per Q11 decision. Wrangler template, CF API deploy fan-out, decommission flow.
+- **Phase 2.2 / 2.3 / 2.7** — implementation tasks (cookies, geo+UA enrichment, KV serve). Unblocked, code-ready.
+- **Phase 1.6** (FX rates) — needs grilling on cron host (CF Cron Trigger? Bun setInterval? Sidecar?).
+- **Phase 1.2** (migration runner) — bun-dependent.
+
+### What I deliberately did NOT do
+
+- Did not author Phase 4/5/6 task corpora — Phase 4's stats (Welch's t-test parameters, bootstrap iterations) and Phase 5's crobot-side details need user input. Better to ask than guess.
+- Did not implement Phase 2.2/2.3/2.7 — would have stacked more code PRs the user hasn't reviewed yet. Better to wait for the morning test pass on what's already pushed.
+- Did not delete merged remote branches (denied earlier; user can clean via GitHub UI).
+
+### Final state for the morning
+
+- main has 13 commits of solid foundation work.
+- 3 draft PRs awaiting review on top of main.
+- All architectural decisions reached in tonight's grilling are captured in BOTH project memory AND the repo (so future agent runs can read them without conversation context).
+- `docs/reference/legacy-globals-inventory.md`, `docs/reference/audience-schema.md`, and the updated arch docs are the canonical sources of truth for the next implementer.
+
+### Routine instruction for resumed sessions
+
+When resuming: read `~/.claude/projects/.../memory/MEMORY.md` first (now ~10 entries), then `tasks/RUN_LOG.md`, then `tasks/README.md`. The lowest-numbered pending unblocked task is `2.2` (cookies module). Phase 3 corpus is fully scoped but blocked-by edges (3.x → 3.x dependencies); pickup order is per the README.
+
+---
+
 ## 2026-05-06 (Wed) — overnight, continued after user said "merge everything yourself"
 
 ### Summary
