@@ -2,61 +2,34 @@
  * Cloudflare Worker — testa-edge
  *
  * Routes (Phase 2):
+ *   GET  /health              healthcheck
  *   GET  /projects/:slug.js   serve pixel loader+runtime from KV (Phase 2.7)
- *   POST /track               accept events, enrich, batch, forward to collector (Phase 2.1-2.6)
+ *   POST /track               accept events, enrich, batch, forward to collector (Phase 2.2-2.6)
  *   OPTIONS /track            CORS preflight
  *
- * Phase 0.3 (skeleton). Real implementation across Phase 2.
+ * This file is the composition root. Route handlers live under `routes/`.
+ * The `BatchBuffer` DurableObject is exported here because Cloudflare's
+ * runtime resolves DO classes from the entry module by name.
  */
 
 import { Hono } from 'hono';
-
-interface Env {
-  KV_PROJECT_CONFIG: KVNamespace;
-  KV_INTEGRATION_BUNDLES: KVNamespace;
-  BATCH_BUFFER: DurableObjectNamespace;
-  INGEST_SHARED_SECRET: string;
-  INGEST_ORIGIN_URL: string;
-  COOKIE_FALLBACK_DOMAIN: string;
-  VISITOR_ID_SALT: string;
-  ENVIRONMENT: string;
-}
+import { health } from './routes/health.ts';
+import { serve } from './routes/serve.ts';
+import { track } from './routes/track.ts';
+import type { Env } from './types.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT }));
-
-app.get('/projects/:slug{.+\\.js}', (c) => {
-  // Implemented in Phase 2.7.
-  return c.text('// pixel placeholder — Phase 2.7\n', 200, {
-    'content-type': 'application/javascript; charset=utf-8',
-    'cache-control': 'no-store',
-  });
-});
-
-app.options(
-  '/track',
-  () =>
-    new Response(null, {
-      status: 204,
-      headers: {
-        'access-control-allow-origin': '*',
-        'access-control-allow-methods': 'POST, OPTIONS',
-        'access-control-allow-headers': 'content-type',
-        'access-control-max-age': '86400',
-      },
-    }),
-);
-
-app.post('/track', (c) => {
-  // Implemented in Phase 2.1 onwards.
-  return c.text('not implemented', 501);
-});
+app.route('/', health);
+app.route('/', serve);
+app.route('/', track);
 
 export default app;
 
 /**
  * Durable Object stub — implemented in Phase 2.5.
+ *
+ * Must stay in this file (CF resolves DO classes from the entry module).
  */
 export class BatchBuffer implements DurableObject {
   async fetch(_request: Request): Promise<Response> {
