@@ -1,0 +1,17 @@
+flowchart TB
+  classDef cro fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+  classDef edge fill:#fff3e0,stroke:#e65100,stroke-width:2px
+
+  ADMIN[testa-admin<br/>Filament ProjectResource] -->|save| MYSQL[(MySQL<br/>projects experiments)]
+  ADMIN -->|signup hook| PROV[ProvisionEdgeWorker job]
+  MYSQL -->|Eloquent saved event| OBS[ProjectConfigObserver]
+  OBS --> JOB[PublishProjectConfigToKV]
+  JOB -->|PUT KV value| KV[(CF KV<br/>project_config:slug)]
+  PROV -->|wrangler deploy<br/>via CF API| EDGE[testa-edge-slug<br/>per-customer worker]
+  KV -.->|reads on next<br/>/projects/slug.js| EDGE
+
+  CI[CI: apps/edge code change] --> FANOUT[Fan-out deploy<br/>to all customer workers]
+  FANOUT -.-> EDGE
+
+  class ADMIN,MYSQL,OBS,JOB,PROV cro
+  class KV,EDGE,CI,FANOUT edge

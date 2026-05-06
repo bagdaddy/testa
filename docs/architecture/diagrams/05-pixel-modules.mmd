@@ -1,0 +1,23 @@
+flowchart LR
+  classDef sync fill:#ffe0b2,stroke:#e65100,stroke-width:2px
+  classDef rt fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+
+  L[loader.ts<br/>sync ~5KB inline]
+  L --> Q[queue stub<br/>window._testa]
+  L --> MP[history monkey-patch<br/>idempotent]
+
+  R[runtime/index.ts<br/>defer ~30-40KB]
+  R --> CK[cookies.ts]
+  R --> CN[consent.ts]
+  R --> NW[network/<br/>outbox + transport + health]
+  R --> RU[rules/<br/>audience + custom-js]
+  R --> EX[experiments/<br/>traffic + apply + redirect]
+  R --> LG[legacy.ts<br/>window.Analytica.*]
+  R --> SP[spa.ts<br/>route-change handler]
+
+  Q -. drained by .-> R
+  MP -. _testa:locationchange .-> SP
+  SP -. re-runs cycle .-> R
+
+  class L,Q,MP sync
+  class R,CK,CN,NW,RU,EX,LG,SP rt

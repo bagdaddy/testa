@@ -1,0 +1,16 @@
+flowchart LR
+  classDef vue fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+  classDef cro fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+  classDef plat fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+
+  V[Vue<br/>RevenueMetrics.vue] -->|GET /api/experiments<br/>/:id/metrics/aov| L[Laravel<br/>MetricsProxyController]
+  L -->|cache 60s<br/>in Redis| RC[(Crobot Redis)]
+  L -->|GET /api/v1/metrics/aov<br/>X-Service-Token| C[Collector read API]
+  C -->|SELECT| CH[(ClickHouse<br/>mv_aov_daily<br/>+ fx_rates dict)]
+  C -->|Welch's t-test<br/>or bootstrap CI| C
+  C -->|JSON| L
+  L -->|JSON| V
+
+  class V vue
+  class L,RC cro
+  class C,CH plat
