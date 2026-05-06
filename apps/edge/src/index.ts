@@ -27,12 +27,8 @@ app.route('/', track);
 export default app;
 
 /**
- * Durable Object stub — implemented in Phase 2.5.
- *
- * Must stay in this file (CF resolves DO classes from the entry module).
+ * Durable Object — buffer + flush. Implementation in `./batch.ts`.
+ * Re-exported here because Cloudflare's runtime resolves DO classes from
+ * the entry module by name.
  */
-export class BatchBuffer implements DurableObject {
-  async fetch(_request: Request): Promise<Response> {
-    return new Response('not implemented', { status: 501 });
-  }
-}
+export { BatchBuffer } from './batch.ts';
