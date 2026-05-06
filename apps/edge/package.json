@@ -15,12 +15,14 @@
     "clean": "rm -rf dist .turbo .wrangler coverage"
   },
   "dependencies": {
-    "hono": "4.6.10"
+    "hono": "4.6.10",
+    "ua-parser-js": "1.0.39"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.5.30",
     "@cloudflare/workers-types": "4.20241112.0",
     "@testa-platform/shared-types": "workspace:*",
+    "@types/ua-parser-js": "0.7.39",
     "typescript": "5.6.3",
     "vitest": "2.1.5",
     "wrangler": "3.86.1"

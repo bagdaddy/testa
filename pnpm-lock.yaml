@@ -48,6 +48,9 @@ importers:
       hono:
         specifier: 4.6.10
         version: 4.6.10
+      ua-parser-js:
+        specifier: 1.0.39
+        version: 1.0.39
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: 0.5.30
@@ -58,6 +61,9 @@ importers:
       '@testa-platform/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@types/ua-parser-js':
+        specifier: 0.7.39
+        version: 0.7.39
       typescript:
         specifier: 5.6.3
         version: 5.6.3
@@ -860,6 +866,9 @@ packages:
   '@types/node@22.9.0':
     resolution: {integrity: sha512-vuyHg81vvWA1Z1ELfvLko2c8f34gyA0zaic0+Rllc5lbCnbSyuvb2Oxpm6TAUAC/2xZN3QGqxBNggD1nNR2AfQ==}
 
+  '@types/ua-parser-js@0.7.39':
+    resolution: {integrity: sha512-P/oDfpofrdtF5xw433SPALpdSchtJmY7nsJItf8h3KXqOslkbySh8zq4dSWXH2oTjRvJ5PczVEoCZPow6GicLg==}
+
   '@types/ws@8.5.14':
     resolution: {integrity: sha512-bd/YFLW+URhBzMXurx7lWByOu+xzU9+kb3RboOteXYDfW+tr+JZa99OyNmPINEGB/ahzKrEuc8rcv4gnpJmxTw==}
 
@@ -1513,6 +1522,10 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  ua-parser-js@1.0.39:
+    resolution: {integrity: sha512-k24RCVWlEcjkdOxYmVJgeD/0a1TiSpqLg+ZalVGV9lsnr4yqu0w7tX/x2xX6G4zpkgQnRf89lxuZ1wsbjXM8lw==}
+    hasBin: true
+
   ufo@1.6.4:
     resolution: {integrity: sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA==}
 
@@ -2127,6 +2140,8 @@ snapshots:
   '@types/node@22.9.0':
     dependencies:
       undici-types: 6.19.8
+
+  '@types/ua-parser-js@0.7.39': {}
 
   '@types/ws@8.5.14':
     dependencies:
@@ -2838,6 +2853,8 @@ snapshots:
       turbo-windows-arm64: 2.3.3
 
   typescript@5.6.3: {}
+
+  ua-parser-js@1.0.39: {}
 
   ufo@1.6.4: {}
 
