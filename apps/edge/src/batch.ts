@@ -1,4 +1,5 @@
 import type { EnrichedEvent } from '@testa-platform/shared-types';
+import { forwardBatch } from './ingest.ts';
 import type { Env } from './types.ts';
 
 /**
@@ -6,8 +7,8 @@ import type { Env } from './types.ts';
  *   - immediately when the buffer hits FLUSH_AT_COUNT, OR
  *   - via a single 500 ms alarm after the first add to a fresh buffer.
  *
- * Phase 2.5 ships the buffering + alarm logic with a stub flush function.
- * Phase 2.6 swaps in the real HMAC-signed POST to the collector.
+ * Default flush is `forwardBatch` (HMAC-signed POST to the collector).
+ * Tests swap it via `__setFlushFnForTests`.
  *
  * Buffer is in-memory only — events lost on DO eviction are acceptable
  * at v1 scale; persisting per-add to DO storage would multiply latency.
@@ -20,24 +21,18 @@ export const MAX_BACKOFF_MS = 8_000;
 
 export type FlushFn = (events: readonly EnrichedEvent[]) => Promise<void>;
 
-/**
- * Default flush — Phase 2.5 stub. Phase 2.6 replaces with HMAC sign + POST.
- * Exported so tests can swap it cleanly.
- */
-export const defaultFlush: FlushFn = async (events) => {
-  // Phase 2.6 will replace this with: forwardBatch(events, env)
-  console.log('[batch] would flush', events.length);
-};
-
 export class BatchBuffer implements DurableObject {
   private readonly state: DurableObjectState;
+  private readonly env: Env;
   private buffer: EnrichedEvent[] = [];
   private flushing = false;
   private backoff = 0;
-  private flushFn: FlushFn = defaultFlush;
+  private flushFn: FlushFn;
 
-  constructor(state: DurableObjectState, _env: Env) {
+  constructor(state: DurableObjectState, env: Env) {
     this.state = state;
+    this.env = env;
+    this.flushFn = (events) => forwardBatch(events, this.env);
   }
 
   /** Test-only: swap the flush implementation. */
