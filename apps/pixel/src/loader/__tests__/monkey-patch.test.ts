@@ -6,7 +6,7 @@ const originalPushState = history.pushState.bind(history);
 const originalReplaceState = history.replaceState.bind(history);
 
 beforeEach(() => {
-  (window as unknown as { [PATCH_FLAG]?: boolean })[PATCH_FLAG] = undefined;
+  (window as unknown as Record<string, unknown>)[PATCH_FLAG] = undefined;
   // Restore native methods so we patch a clean slate.
   Object.defineProperty(history, 'pushState', {
     value: originalPushState,
