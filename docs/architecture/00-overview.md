@@ -1,5 +1,7 @@
 # Architecture — Overview
 
+> **Visual reference:** [`06-system-diagram.md`](./06-system-diagram.md) has full Mermaid diagrams (system overview, write/read paths, config publish, per-customer worker provisioning, pixel internals, audience tree, redirect engine, data model). Skim that first if you prefer pictures to prose.
+
 ## What this is
 
 A new analytics pipeline for Testa's experimentation platform. Replaces a single hand-edited `script.js` (1300+ lines, currently in crobot at `resources/js/integration/3.6/script.js`) with three cleanly separated TypeScript components, plus a self-hosted ClickHouse warehouse.
