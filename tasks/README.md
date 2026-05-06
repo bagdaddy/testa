@@ -46,14 +46,14 @@ Foundation work was done in the seed commits before this task system existed. Se
 
 | ID | Task | Status | Blocked by |
 |---|---|---|---|
-| [3.1](./phase-3/3.1-loader-stub.md) | Loader stub + queue + monkey-patch installer | pending | — |
+| [3.1](./phase-3/3.1-loader-stub.md) | Loader stub + queue + monkey-patch installer | done | — |
 | [3.2](./phase-3/3.2-runtime-entry.md) | Runtime entry + queue hydration + `_testa.load()` | pending | 3.1 |
-| [3.3](./phase-3/3.3-cookies-module.md) | Cookie module (5 cookies) | pending | — |
-| [3.4](./phase-3/3.4-consent-state-machine.md) | Consent state machine + CMP integration | pending | — |
+| [3.3](./phase-3/3.3-cookies-module.md) | Cookie module (7 cookies inc. freq + mutex) | done | — |
+| [3.4](./phase-3/3.4-consent-state-machine.md) | Consent state machine + CMP integration | done | — |
 | [3.5](./phase-3/3.5-spa-navigation.md) | SPA navigation (patch consumer + canonical URL diff) | pending | 3.1 |
 | [3.6](./phase-3/3.6-idb-outbox-transport.md) | IDB outbox + transport + retry + `_pixel_health` | pending | 3.4 |
-| [3.7](./phase-3/3.7-audience-rule-engine.md) | Audience rule engine + sandboxed JS evaluator + legacy compat | pending | — |
-| [3.8](./phase-3/3.8-traffic-assignment.md) | Variation traffic assignment (consistent-hash) | pending | 3.3 |
+| [3.7](./phase-3/3.7-audience-rule-engine.md) | Audience rule engine + sandboxed JS evaluator + legacy compat | in_progress | — |
+| [3.8](./phase-3/3.8-traffic-assignment.md) | Variation traffic assignment (xxhash32 + freq + mutex) | done | 3.3 |
 | [3.9](./phase-3/3.9-variation-apply.md) | Variation apply (CSS / HTML / text / attr / JS) | pending | 3.8 |
 | [3.10](./phase-3/3.10-redirect-engine.md) | Redirect engine (decide + execute + loop guard + cross-domain + SPA) | pending | 3.7, 3.8 |
 | [3.11](./phase-3/3.11-spa-redirect-harness.md) | SPA redirect repro harness (Next 12/13/14, RR6, plain JS) | pending | 3.10 |
