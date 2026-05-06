@@ -1,8 +1,8 @@
 # Architecture — System diagrams
 
-Five rendered SVG diagrams for the testa-platform system after all 2026-05-06 grilling decisions. SVGs render in any browser, IDE, image viewer, or markdown previewer — no Mermaid plugin needed.
+Five rendered PNG diagrams for the testa-platform system after all 2026-05-06 grilling decisions. PNGs render universally — no Mermaid plugin, no SVG-blocking-CSP issues, no security warnings.
 
-Sources are checked into `diagrams/*.mmd`. Rebuild with `pnpm diagrams` (or `npx -p @mermaid-js/mermaid-cli mmdc -i ... -o ...`).
+Sources are checked into `diagrams/*.mmd`. SVG copies are also kept for vector zoom (some viewers prefer them). Rebuild with `pnpm diagrams`.
 
 If anything in here drifts from the prose docs (`00-overview.md` … `05-rollout.md`) or the project memory entries, the prose / memory wins — this doc is updated to match, not the reverse.
 
@@ -10,7 +10,7 @@ If anything in here drifts from the prose docs (`00-overview.md` … `05-rollout
 
 ## 1. Components
 
-![Components](./diagrams/01-components.svg)
+![Components](./diagrams/01-components.png)
 
 What runs where.
 
@@ -26,7 +26,7 @@ What runs where.
 
 ## 2. Write path — events landing in ClickHouse
 
-![Write path](./diagrams/02-write-path.svg)
+![Write path](./diagrams/02-write-path.png)
 
 The full chain when a customer's site emits an event.
 
@@ -47,7 +47,7 @@ Same `event_id` retried any number of times (pixel network blip → outbox retri
 
 ## 3. Read path — dashboard query → ClickHouse MVs
 
-![Read path](./diagrams/03-read-path.svg)
+![Read path](./diagrams/03-read-path.png)
 
 1. Vue component requests metrics through crobot's existing API.
 2. Laravel's `MetricsProxyController` runs the existing user/permission middleware, checks a 60-second Redis cache.
@@ -62,7 +62,7 @@ The collector does **not** enforce per-experiment authorization — only that th
 
 ## 4. Control plane — config publish + worker provisioning
 
-![Control plane](./diagrams/04-control-plane.svg)
+![Control plane](./diagrams/04-control-plane.png)
 
 Two flows in one diagram because both run from the same admin actions.
 
@@ -86,7 +86,7 @@ The shared `track.testa.com` deployment serves customers without CNAME setup.
 
 ## 5. Pixel internals (`apps/pixel`)
 
-![Pixel modules](./diagrams/05-pixel-modules.svg)
+![Pixel modules](./diagrams/05-pixel-modules.png)
 
 Two parts: a thin sync loader and a deferred runtime.
 
@@ -129,13 +129,7 @@ These are too detailed for a system diagram; they live in the prose / reference 
 When an architectural decision changes:
 
 1. Edit the relevant `.mmd` source under `docs/architecture/diagrams/`.
-2. Re-render: `pnpm diagrams` (root script) or:
-   ```sh
-   cd docs/architecture/diagrams
-   for f in *.mmd; do
-     npx -p @mermaid-js/mermaid-cli mmdc -i "$f" -o "${f%.mmd}.svg" -b transparent
-   done
-   ```
-3. Commit both the `.mmd` and the `.svg` (the rendered image is what readers see; the source is what reviewers diff).
+2. Re-render: `pnpm diagrams` from the repo root.
+3. Commit the `.mmd`, `.png`, and `.svg` together (PNG is what's referenced from the markdown; SVG is the vector fallback; .mmd is what reviewers diff).
 
 Keep diagram fidelity as a PR-review checklist item: any prose change in `02-collector.md`, `03-data-model.md`, `05-rollout.md`, etc. that changes a flow direction or component should also touch the corresponding `.mmd` source + re-rendered `.svg` in the same PR.
