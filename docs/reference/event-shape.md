@@ -16,7 +16,7 @@ All three are kept in lockstep via `packages/shared-types/src/event.ts`. If you 
 interface PixelEvent {
   event_id: string;          // UUIDv7, generated client-side per event, persisted in IDB outbox
   event_name: EventName;     // reserved or custom; validated at edge
-  ts: number;                // Unix ms, client clock at fire time
+  client_ts: number;         // Unix ms, client clock at fire time (renamed from `ts`)
   project_id: number;
   experiment_id?: number;    // omitted for non-experiment events
   variation_id?: number;     // omitted for non-experiment events
@@ -25,6 +25,12 @@ interface PixelEvent {
   url: string;               // full URL (path + query, no fragment)
   referrer?: string;         // document.referrer if same-origin or trusted
   consent_state: ConsentState; // 'granted' | 'denied' | 'unknown'
+  tracker_version: string;   // build-time pixel version, e.g. '4.0.3'
+  viewport_w: number;        // window.innerWidth at fire time, 0 if unavailable
+  viewport_h: number;        // window.innerHeight at fire time, 0 if unavailable
+  utm_source?: string;       // parsed from location.search by the pixel
+  utm_medium?: string;
+  utm_campaign?: string;
   // revenue (purchase events only)
   value_native?: number;     // 49.99
   currency?: string;         // ISO 4217, e.g. 'USD'
@@ -62,9 +68,11 @@ The edge worker takes `PixelEvent`, drops fields you don't want forwarded (raw I
 
 ```ts
 interface EnrichedEvent extends PixelEvent {
-  ingested_at: number;       // Unix ms when the worker received the event
+  server_ts: number;         // Unix ms when the worker received the event (renamed from `ingested_at`)
   country: string;           // CF-IPCountry, 2-letter, 'XX' if unknown
   region: string;            // CF region, may be empty
+  region_subdivision: string;// CF-derived state/province, e.g. 'California'
+  city: string;              // CF-IPCity, e.g. 'San Francisco'
   device_type: 'desktop' | 'mobile' | 'tablet' | 'bot' | 'unknown';
   browser: string;           // ua-parser, e.g. 'Chrome', 'Safari'
   os: string;                // ua-parser, e.g. 'macOS 14.5', 'iOS 17.6'
@@ -81,8 +89,8 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
 | EnrichedEvent field | CH column | CH type |
 |---|---|---|
 | event_id | event_id | UUID |
-| ts | ts | DateTime64(3, 'UTC') |
-| ingested_at | ingested_at | DateTime64(3, 'UTC') |
+| client_ts | client_ts | DateTime64(3, 'UTC') |
+| server_ts | server_ts | DateTime64(3, 'UTC') |
 | project_id | project_id | UInt64 |
 | experiment_id | experiment_id | Nullable(UInt64) |
 | variation_id | variation_id | Nullable(UInt64) |
@@ -93,11 +101,19 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
 | referrer | referrer | String (default '') |
 | country | country | LowCardinality(String) |
 | region | region | LowCardinality(String) |
+| region_subdivision | region_subdivision | LowCardinality(String) (default '') |
+| city | city | LowCardinality(String) (default '') |
 | device_type | device_type | LowCardinality(String) |
 | browser | browser | LowCardinality(String) |
 | os | os | LowCardinality(String) |
+| viewport_w | viewport_w | UInt16 (default 0) |
+| viewport_h | viewport_h | UInt16 (default 0) |
+| tracker_version | tracker_version | LowCardinality(String) (default '') |
 | is_bot | is_bot | UInt8 |
 | consent_state | consent_state | LowCardinality(String) |
+| utm_source | utm_source | LowCardinality(String) (default '') |
+| utm_medium | utm_medium | LowCardinality(String) (default '') |
+| utm_campaign | utm_campaign | LowCardinality(String) (default '') |
 | value_native | value_native | Decimal(18, 4) (default 0) |
 | currency | currency | LowCardinality(String) (default '') |
 | order_id | order_id | String (default '') |
@@ -110,15 +126,19 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
 
 ```json
 {
-  "event_id": "8c7e9b2a-2f7d-4c3a-9c1e-...",
+  "event_id": "01923a4f-7000-7d9c-bb8f-1234567890ab",
   "event_name": "page_view",
-  "ts": 1730902400123,
+  "client_ts": 1730902400123,
   "project_id": 42,
   "visitor_id": "v_abc123",
   "session_id": "s_xyz789",
-  "url": "https://store.example.com/products/widget",
+  "url": "https://store.example.com/products/widget?utm_source=google",
   "referrer": "https://google.com/",
-  "consent_state": "granted"
+  "consent_state": "granted",
+  "tracker_version": "4.0.3",
+  "viewport_w": 1920,
+  "viewport_h": 1080,
+  "utm_source": "google"
 }
 ```
 
@@ -126,16 +146,19 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
 
 ```json
 {
-  "event_id": "...",
+  "event_id": "01923a4f-7000-7d9c-bb8f-...",
   "event_name": "experiment_view",
-  "ts": 1730902400500,
+  "client_ts": 1730902400500,
   "project_id": 42,
   "experiment_id": 17,
   "variation_id": 100,
   "visitor_id": "v_abc123",
   "session_id": "s_xyz789",
   "url": "https://store.example.com/products/widget",
-  "consent_state": "granted"
+  "consent_state": "granted",
+  "tracker_version": "4.0.3",
+  "viewport_w": 1920,
+  "viewport_h": 1080
 }
 ```
 
@@ -143,9 +166,9 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
 
 ```json
 {
-  "event_id": "...",
+  "event_id": "01923a4f-7000-7d9c-bb8f-...",
   "event_name": "purchase",
-  "ts": 1730906000000,
+  "client_ts": 1730906000000,
   "project_id": 42,
   "experiment_id": 17,
   "variation_id": 100,
@@ -153,6 +176,11 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
   "session_id": "s_xyz789",
   "url": "https://store.example.com/checkout/success",
   "consent_state": "granted",
+  "tracker_version": "4.0.3",
+  "viewport_w": 414,
+  "viewport_h": 896,
+  "utm_source": "email",
+  "utm_campaign": "summer_sale",
   "value_native": 49.99,
   "currency": "USD",
   "order_id": "ORD-20260505-0042",
@@ -165,14 +193,17 @@ See `docs/reference/clickhouse-schema.md` for the canonical DDL. Mapping:
 
 ```json
 {
-  "event_id": "...",
+  "event_id": "01923a4f-7000-7d9c-bb8f-...",
   "event_name": "newsletter_signup",
-  "ts": 1730902450000,
+  "client_ts": 1730902450000,
   "project_id": 42,
   "visitor_id": "v_abc123",
   "session_id": "s_xyz789",
   "url": "https://store.example.com/",
   "consent_state": "granted",
+  "tracker_version": "4.0.3",
+  "viewport_w": 1440,
+  "viewport_h": 900,
   "props": { "form_id": "footer_newsletter", "source": "blog_post" }
 }
 ```

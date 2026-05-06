@@ -5,7 +5,7 @@ ORDER BY (project_id, experiment_id, variation_id, day)
 SETTINGS allow_nullable_key = 1
 AS
 SELECT
-    toDate(ts)              AS day,
+    toDate(client_ts)       AS day,
     project_id,
     experiment_id,
     variation_id,
