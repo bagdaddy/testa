@@ -58,16 +58,22 @@ function writeManifest() {
   writeFileSync(resolve(outdir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+/** Strip the metadata `name` field — esbuild rejects it as an unknown option. */
+function toEsbuildOptions(b) {
+  const { name: _name, ...rest } = b;
+  return { ...baseOptions, ...rest };
+}
+
 if (watch) {
   for (const b of builds) {
-    const ctx = await context({ ...baseOptions, ...b });
+    const ctx = await context(toEsbuildOptions(b));
     await ctx.watch();
   }
   console.log('[pixel] watching for changes...');
   process.on('SIGINT', () => process.exit(0));
 } else {
   for (const b of builds) {
-    await build({ ...baseOptions, ...b });
+    await build(toEsbuildOptions(b));
   }
   writeManifest();
   console.log('[pixel] build complete');

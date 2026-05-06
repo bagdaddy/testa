@@ -1,33 +1,19 @@
 /**
- * Tiny synchronous loader stub injected at the top of the served pixel.
+ * Synchronous loader stub injected inline at the top of the served pixel.
  *
- * Responsibilities:
- *   1. Create `window._testa` and a queue (`q`) so customer code can call
- *      `_testa.track(...)`, `_testa.consent(...)`, etc. before the runtime
- *      has finished loading.
- *   2. Async-load the runtime bundle.
- *   3. The runtime, once loaded, drains the queue.
+ * Two responsibilities:
+ *   1. Set up `window._testa` queue (`./loader/queue.ts`)
+ *   2. Install the history monkey-patch (`./loader/monkey-patch.ts`)
  *
- * Constraint: stays under 5 KB minified. No dependencies.
+ * Stays under 5 KB minified. No external dependencies. Sync — runs before any
+ * customer code that depends on `window._testa` being present.
  *
- * Phase 0.2 (skeleton). Real implementation in Phase 3.1.
+ * The runtime bundle (`./runtime/index.ts`) loads after this with `<script defer>`
+ * and hydrates the queue + replaces method bodies with live implementations.
  */
 
-declare global {
-  interface Window {
-    _testa?: TestaQueue;
-  }
-}
+import { installMonkeyPatch } from './loader/monkey-patch.ts';
+import { installQueue } from './loader/queue.ts';
 
-interface TestaQueueCall {
-  method: string;
-  args: unknown[];
-}
-
-interface TestaQueue {
-  q: TestaQueueCall[];
-  track: (event_name: string, props?: Record<string, unknown>) => void;
-  consent: (state: 'granted' | 'denied' | 'unknown') => void;
-}
-
-export {};
+installQueue();
+installMonkeyPatch();
