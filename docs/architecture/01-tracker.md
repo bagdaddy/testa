@@ -8,6 +8,8 @@ The tracker is the **client-side SDK system**: TS pixel runtime + Cloudflare Wor
 
 A separate **premium CNAME-edge offering** can route customer traffic through our worker (CNAME-based) for zero-flicker first-pageload behavior; that's a side product, not the default. Nothing in the default integration path runs on the edge worker beyond the gateway role above.
 
+**Edge workers are deployed per-customer.** Each customer gets their own Cloudflare Worker (`testa-edge-{customer_slug}`) provisioned at signup; customer-specific traffic spikes scale that customer's worker independently and bill them for it. The shared `track.testa.com` deployment serves customers without CNAME setup (third-party cookies). See `docs/architecture/05-rollout.md` § Edge worker deployment model.
+
 **Anti-flicker is not the pixel's responsibility.** The customer pastes a small SmartCode snippet that hides their `<body>` until the pixel signals readiness via `_testa.load()` (or a configurable timeout, never strand). The pixel never injects opacity/visibility shields itself. This mirrors the VWO / Optimizely SmartCode pattern.
 
 ## Two-piece pixel: loader + runtime

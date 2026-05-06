@@ -99,17 +99,32 @@ These were considered for "later" in earlier drafts; subsequent architecture gri
 
 - **Redirect engine rework.** State-of-the-art. SPA + Next.js compatibility, query-param fidelity, loop guard, cross-domain visitor stitching. Specifics in `docs/architecture/01-tracker.md` § Redirect engine. Repro harness across Next 12/13/14 and react-router-dom 6 lands with the engine.
 - **Audience targeting upgrade.** Tier 1 + Tier 2 dimensions (geo, device, browser, OS, language, time, referrer, query param, cookie, isReturning, dataLayer, custom JS) under a nestable `all`/`any`/`not` JSON schema. See `docs/reference/audience-schema.md`. Sandboxed expression language for `visitor.custom`; no real `eval`.
-- **IndexedDB-backed event outbox + `_pixel_health` observability.** Durable retry queue, force-flush on pagehide, deterministic Redis stream IDs for idempotency. Specifics in `docs/architecture/01-tracker.md` § Event delivery and `docs/architecture/02-collector.md` § Idempotency.
-- **`window.Analytica.*` legacy global surface.** Frozen API for drop-in compat with 3.x customers. See `docs/reference/legacy-pixel-mapping.md`.
+- **IndexedDB-backed event outbox + `_pixel_health` observability.** Durable retry queue, force-flush on pagehide, `SETNX`-before-`XADD` idempotency on the collector. Specifics in `docs/architecture/01-tracker.md` § Event delivery and `docs/architecture/02-collector.md` § Idempotency.
+- **`window.Analytica.*` legacy global surface.** Frozen API for drop-in compat with 3.x customers. See `docs/reference/legacy-pixel-mapping.md` and `docs/reference/legacy-globals-inventory.md`.
+- **Per-experiment frequency cap + mutex groups.** Tier-2 audience features built into experiment config: `frequency_cap: { max, window }` and `mutex_group: string`. See `docs/reference/project-config-shape.md`.
 
 ## Tracked follow-ups (truly post-pilot)
 
 - **Copy-test improvements.** 4.0 ships the 1:1-port behavior; rework after rollout once we have a pilot's worth of regression data.
 - **Migrating away from `leads` / `lead_completed_goals`.** They stay in v1; CH coexists.
 
+## Edge worker deployment model — per-customer workers
+
+testa-platform deploys **one Cloudflare Worker per customer** (named e.g. `testa-edge-{customer_slug}`). Customer signup triggers a `ProvisionEdgeWorker` job in crobot that programmatically deploys a worker from a wrangler template, with bindings + secrets pre-configured. Customer's CNAME (`track.{customer-domain}`) points to their dedicated worker.
+
+This gives:
+
+- **Failure isolation.** A bug in one customer's KV config or a customer-induced traffic spike stays in their worker; CF auto-scales them independently and bills them for it.
+- **Zero noisy-neighbor concerns at the edge.** Each customer is on their own runtime instance pool.
+- **No technical rate limiting.** The product applies rate limiting **as little as possible**. Customer's monthly lead-creation quota in crobot is the only meaningful "cap" and that's billing-level, not operational. Collector keeps a **circuit breaker** (Redis stream depth threshold → 503) for catastrophic protection of shared infra, but no per-project caps.
+
+The shared `testa-edge` deployment serving `track.testa.com` becomes the **fallback / shared-domain mode** for customers without CNAME setup (third-party cookies; pre-CNAME onboarding).
+
+A new task corpus (Phase 6) will scope the worker provisioning workflow + CI fan-out for code updates across all customer workers.
+
 ## Optional / premium offerings
 
-- **CNAME-edge integration.** Customers who CNAME their tracking domain to our worker get zero-flicker first-pageload behavior (worker decides redirect/audience inline, returns sync redirect JS). This is opt-in, marketed as a premium tier; default integration is the JS pixel and customers' own origins. Default integration uses the worker only as a thin gateway.
+- **CNAME-edge with worker-decided redirect/audience.** Customers can opt into having the dedicated worker serve sync redirect JS for first-pageload zero-flicker. Most customers stick with pixel-decided (the default and 99% of integrations). See `docs/architecture/01-tracker.md` § Integration model.
 
 ## Out of scope for this redesign
 

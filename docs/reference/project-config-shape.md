@@ -33,6 +33,8 @@ The JSON object crobot publishes to Cloudflare KV per project. The edge worker r
           { "fact": "geo.country",  "op": "in", "value": ["US", "CA"] }
         ]
       },
+      "frequency_cap": { "max": 3, "window": "week" },
+      "mutex_group": "checkout_optimization",
       "variations": [
         {
           "variation_id": 100,
@@ -96,9 +98,38 @@ Full schema in `docs/reference/audience-schema.md`. Backwards compat: legacy `ta
 
 0–100. Percentage of eligible visitors who participate. Remaining are excluded (`_testa_excl` cookie set).
 
+### `frequency_cap`
+
+Optional. New in 4.0. Caps how many times a visitor sees this experiment within a rolling window:
+
+```ts
+frequency_cap?: {
+  max: number;
+  window: 'session' | 'day' | 'week' | 'month';
+}
+```
+
+- `max`: count of `experiment_view` fires before the visitor is excluded.
+- `window`: rolling window. `'session'` means until the session cookie expires; the others are calendar windows.
+- Counter is persisted in `_testa_freq_<experiment_id>` cookie; resets when the window elapses.
+
+If absent, no cap is applied.
+
+### `mutex_group`
+
+Optional. New in 4.0. A free-text group name. A visitor can be in **at most one** active experiment per `mutex_group` value. Once enrolled, subsequent experiments sharing the same group will skip enrollment for that visitor (no `experiment_view`, no variation applied).
+
+```ts
+mutex_group?: string;   // e.g. "checkout_optimization"
+```
+
+Persisted in `_testa_mutex_<group_name>` cookie holding the assigned `experiment_id`.
+
+If absent, no mutex constraint.
+
 ### `weight`
 
-Per-variation weight for traffic distribution. Sum across active variations should equal 100. The pixel uses consistent-hash assignment (`hash(visitor_id + experiment_id) mod 100`).
+Per-variation weight for traffic distribution. Sum across active variations should equal 100. The pixel uses **deterministic xxhash32 bucketing**: `xxhash32(visitor_id + ':' + experiment_id, seed=0xABCDEF) % 100`. Same visitor + same experiment always produces the same bucket — eliminates the SRM (Sample Ratio Mismatch) drift seen with `Math.random()`-based bucketing in 3.6.
 
 ### `changes`
 

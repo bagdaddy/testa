@@ -143,7 +143,7 @@ Daily Frankfurter pull populates the source endpoint. Queries convert via `dictG
 
 ## Idempotency / dedup
 
-Same-`event_id` duplicates (from pixel IDB-outbox retries, edge retries, consumer restart races) are deduped at the Redis Stream layer via deterministic stream entry IDs — same `event_id` → same stream ID → second `XADD` is a no-op. CH never sees the dup. See `docs/architecture/02-collector.md` § Idempotency.
+Same-`event_id` duplicates (from pixel IDB-outbox retries, edge retries, consumer restart races) are deduped at the collector via Redis `SET ... NX EX 600` *before* `XADD`. The dedup is **selectively applied to a configured allow-list of event names** (default `['purchase']`), not all events — most metrics use `uniqExact()` and are immune. See `docs/architecture/02-collector.md` § Idempotency for the full mechanism. CH never sees a duplicate purchase row, so `sum(value_native)` and `count()` over `event_name = 'purchase'` are accurate.
 
 The `events` table stays a plain `MergeTree`. No `ReplacingMergeTree`, no `FINAL`. Query patterns are standard.
 

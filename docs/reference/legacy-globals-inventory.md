@@ -14,6 +14,8 @@ Complete enumeration of the `window.Analytica` surface exposed by `crobot/resour
 | `Analytica.USER_COOKIE` | `"_testa_user"` | Per-experiment first-time-seen cookie name prefix | `runtime/cookies.ts` |
 | `Analytica.UUID_COOKIE` | `"_testa_uuid"` | Persistent visitor UUID cookie name | `runtime/cookies.ts` |
 | `Analytica.EXCLUDED_COOKIE` | `"_testa_excl"` | Per-experiment exclusion cookie name prefix | `runtime/cookies.ts` |
+| `Analytica.FREQ_COOKIE` | `"_testa_freq"` | Per-experiment frequency-cap counter cookie prefix (new in 4.0) | `runtime/cookies.ts` |
+| `Analytica.MUTEX_COOKIE` | `"_testa_mutex"` | Per-mutex-group assigned-experiment-id cookie prefix (new in 4.0) | `runtime/cookies.ts` |
 | `Analytica.CROSS_DOMAIN_PARAM` | `"_testa_cd"` | URL param name for cross-domain visitor stitching | `runtime/experiments/redirect/cross-domain.ts` |
 | `Analytica.SESSION_LENGTH` | `60 * 60 * 1000` (ms) | Session inactivity window | `runtime/cookies.ts` |
 | `Analytica.CLICK_SELECTOR_TIMEOUT` | `100` (ms) | Polling interval for click-goal selector | `runtime/experiments/apply/index.ts` |
@@ -47,6 +49,8 @@ Complete enumeration of the `window.Analytica` surface exposed by `crobot/resour
 | `Analytica.ses` | `Record<experimentIdentifier, sessionExpiryMs>` | Updated on session activity | Per-experiment session timestamps |
 | `Analytica.usr` | `Record<experimentIdentifier, firstSeenMs>` | Set first time visitor sees an experiment | Per-experiment first-seen timestamps |
 | `Analytica.excl` | `Record<experimentIdentifier, 0|1>` | Set when targeting decides this visitor is excluded | Per-experiment exclusion cache |
+| `Analytica.freq` | `Record<experimentIdentifier, {count: number; window_start_ts: number}>` | Updated each time `experiment_view` fires for that experiment (new in 4.0) | Per-experiment frequency-cap counter cache |
+| `Analytica.mutex` | `Record<mutexGroupName, experimentIdentifier>` | Set when a visitor is enrolled in any experiment with `mutex_group: G` (new in 4.0) | Per-mutex-group active-assignment cache |
 | `Analytica.sent` | `Record<experimentIdentifier, 0|1>` | Set after a `lead` POST succeeds | Dedup flag preventing double-send per experiment |
 | `Analytica.isLoaded` | boolean | Flips true after first `r.init()` cycle | **DEPRECATED** but referenced; kept for compat |
 | `Analytica.isRedirecting` | boolean | True for the duration of a redirect | Prevents further processing while a redirect fires |
