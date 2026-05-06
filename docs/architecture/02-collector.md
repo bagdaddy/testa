@@ -61,27 +61,41 @@ Handler:
 2. Compute HMAC-SHA256(`${signed_at}.${rawBody}`, INGEST_SHARED_SECRET).
    Compare via timing-safe equal to X-Edge-Signature. Reject 401 on mismatch.
 3. Zod-validate body.events against IngestBatch.events schema. Reject 400 on fail.
-4. For each event: redis.xadd('events', `${ev.event_id}-${ev.ts_ms}`, ...payload).
-   Deterministic stream ID — see § Idempotency below. Same event_id retried → same
-   stream id → second XADD is a no-op (Redis rejects duplicate IDs).
+4. For each event:
+     if event.event_name in INGEST_DEDUP_EVENT_NAMES:
+       SET event:seen:<event_id> 1 EX 600 NX
+       if reply == nil: skip (duplicate)
+     XADD events * <payload>
 5. Return 204.
 ```
 
 ## Idempotency
 
-Pixel-side IDB outbox means a given `event_id` (UUIDv7, generated at the pixel) may be POSTed multiple times: edge retries on 5xx, the entire batch retries when the pixel hasn't seen a success yet, etc. Without dedup, duplicates would inflate AOV / RPV / orders — catastrophic for a paid tool.
+Pixel-side IDB outbox means a given `event_id` (UUIDv7, generated at the pixel) may be POSTed multiple times: edge retries on 5xx, the entire batch retries when the pixel hasn't seen a success yet, etc. Without dedup, duplicates would inflate `sum()` and `count()` aggregates: total revenue, orders count, page views count, RPV all over-stated. AOV is robust by construction (proportional cancellation in numerator and denominator) but RPV and absolute revenue are not.
 
-The dedup happens at the Redis Stream layer using **deterministic stream entry IDs**:
+The dedup mechanism is **Redis `SET ... NX EX 600` before `XADD`**, applied only to event names in a configurable allow-list (`INGEST_DEDUP_EVENT_NAMES`, default `['purchase']`):
 
 ```
-XADD events <event_id>-<ts_ms> ...payload
+on /_ingest, for each event:
+  if event.event_name in DEDUP_EVENT_NAMES:
+    SET event:seen:<event_id> 1 EX 600 NX
+    if reply == nil:
+      skip (duplicate; do NOT XADD)
+      log _pixel_health late-arrival counter
+  XADD events * payload   -- always for events that pass the dedup check
 ```
 
-Redis Streams require strictly monotonic IDs *within a stream*, but the second arg to `XADD` accepts an explicit `<ms>-<seq>` shape and rejects an ID that's not strictly greater than the previous. We instead use `<event_id_hash>-<seq>` semantics — a 64-bit hash of `event_id` is concatenated with a `ts_ms` suffix to maintain ordering, and the hash collisions (vanishingly rare for UUIDv7) are caught by an explicit `XADD ... NOMKSTREAM` + duplicate detection.
+Why this design:
 
-Concretely, the implementation uses the [Redis Streams MINID + custom sequencing pattern](https://redis.io/docs/latest/develop/data-types/streams/) — see the implementation notes in the task file for 1.4. The end result: same `event_id` POSTed N times → only the first reaches the consumer → only one row in ClickHouse per `event_id`.
+- **`SETNX` semantics fit perfectly**: only the first observer of an `event_id` gets a successful reply; retries fail loudly and are skipped.
+- **Allow-list, not all-events**: Most event types are immune to duplication anyway (sessions, visitor counts use `uniqExact`). Only `purchase` events directly inflate `sum(value_native)` and `count()` in the aggregates customers reconcile against external systems. Other event types can be opted-in later by extending the env var (e.g. `purchase,email_submit`).
+- **10-min TTL** comfortably covers the 5-min HMAC replay window and gives slack for IDB outbox flushes that spent extra time on a slow network.
+- **Pipelined**: `(SET, XADD)` for each event in one Redis pipeline — single round trip per batch.
+- **Memory cost**: at 250 ev/s × ~10% purchase mix × 600 s ≈ 15k keys ≈ ~1 MB. Negligible.
 
-CH `events` table stays a plain `MergeTree`. No `ReplacingMergeTree`, no `FINAL`, no schema disruption. Dedup is entirely at the queue.
+CH `events` table stays a plain `MergeTree`. No `ReplacingMergeTree`, no `FINAL`, no schema disruption. Dedup is entirely upstream.
+
+> **Why not deterministic stream entry IDs (`XADD events <event_id>-...`)?** Earlier drafts of this doc proposed that. It doesn't work: Redis Streams require strictly monotonically increasing IDs *across the entire stream*, so you can't reliably encode a per-event-id dedup key into the stream entry ID. Out-of-order producers would fail. `SETNX`-before-`XADD` is the standard Redis dedup pattern.
 
 Throughput target at peak: **250 batched req/s** (assuming ~100 events/batch). Each request does N XADDs (N up to 100). Bun + ioredis comfortably exceeds this.
 
