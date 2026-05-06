@@ -4,6 +4,88 @@ Routine / agent session log. Most recent at top. Each entry: what was picked up,
 
 ---
 
+## 2026-05-07 (Thu) — Phase 3 implementation sweep (pixel)
+
+### Context
+
+User asked "wanna start phase 3?" with no other input needed. Answered yes and worked through the foundational pixel modules.
+
+### Merged into main this session (5 implementation + 1 status)
+
+| PR | What | Tip on main |
+|---|---|---|
+| `feat/3.1-loader` | Sync loader: queue stub + history monkey-patch (microtask ordering, idempotent, bfcache re-install). Drive-by fix to esbuild config. Loader bundle: 1037 bytes. | `fccc6fd` |
+| `feat/3.3-pixel-cookies` | All 7 _testa_* cookie helpers + storage primitives with localStorage mirror (survives ITP). | `2f67b45` |
+| `feat/3.4-consent` | State machine, CMP listener, strict-mode hold/release, subscriber error isolation. | `d97c6a6` |
+| `feat/3.7-audience` | AudienceCondition + AudienceLeaf in shared-types. Evaluator covers all leaf types except `visitor.custom` (deferred — needs crobot AST compiler). | `89b2ed2` |
+| `feat/3.8-traffic` | xxhash32 (verified against reference vectors), assign() with cookie-first lookup + freq cap + mutex group + traffic allocation, recordExposure(). | `dbbfd7a` |
+| `chore/phase3-batch-1-status` | Marks 3.1, 3.3, 3.4, 3.8 done; 3.7 in_progress (visitor.custom deferred). | `48cb121` |
+
+### Phase 3 status
+
+| Task | Status |
+|---|---|
+| 3.1 Loader + queue + monkey-patch | ✅ done |
+| 3.2 Runtime entry / lifecycle | pending — natural next step (wires what's already built) |
+| 3.3 Cookies | ✅ done |
+| 3.4 Consent | ✅ done |
+| 3.5 SPA navigation (consumer side) | pending |
+| 3.6 IDB outbox + transport + _pixel_health | pending |
+| 3.7 Audience rule engine | 🟡 in_progress (evaluator done; visitor.custom AST deferred to 3.7b) |
+| 3.8 Traffic + freq + mutex | ✅ done |
+| 3.9 Variation apply | pending |
+| 3.10 Redirect engine | pending |
+| 3.11 SPA redirect harness | pending |
+| 3.12 window.Analytica.* legacy | pending |
+| 3.13 Legacy HTTP calls | pending |
+| 3.14 Bundle build | partial (esbuild config fixed; needs size-cap CI) |
+| 3.15 Test coverage | running coverage already at ~80% via per-task tests |
+
+### Pixel test stats
+
+- Start of Phase 3: 2 tests passing (smoke only).
+- End of this session: **128 tests passing** across loader, cookies, consent, audience, traffic, xxhash.
+- Bundle: loader 1037b, runtime stub 458b (both well under their caps).
+
+### Things that fought back
+
+A few sharp edges worth noting for next time:
+
+- **JSDoc + literal `*/`**: writing `viewport/utm_*/tracker_version` inside a JSDoc comment terminates the comment. Burned us once in 2.3 already; bit me again in another file. Lesson: stop putting the literal `*/` substring inside any block-comment context.
+- **happy-dom `Number('')` → 0**: an empty cookie value (which we get after `Max-Age=0` erase in happy-dom) silently coerces to 0. Fixed by treating empty cookie value as absent in `readCookie`.
+- **biome `noNonNullAssertion`** keeps catching `arr[i]!` patterns. Workaround: keep an explicit `?? 0` next to every indexed access in tests, or assign to a local first.
+- **Workers `Request.cf` is read-only.** Forces purer test contracts (take inputs explicitly, build them from `request.cf` only at the route level).
+
+### What's NOT done that's worth flagging
+
+- **`visitor.custom` audience leaf returns false** until crobot ships its JS-to-AST compiler (Phase 5.x). Customers using custom JS audiences are silently excluded; safer than evaluating arbitrary JS via eval(). Documented in code with TODO.
+- **3.7 legacy targeting[] compat** not written yet — not strictly needed until we onboard a 4.0 project that imports from a 3.x admin form.
+- **3.2 runtime lifecycle** is the natural next step; assembles the parts that 3.1, 3.3, 3.4, 3.7, 3.8 individually built.
+- **Edge `/track` POST handler still returns 501** — same status as before this session. Wiring is its own task (effectively part of 2.8 integration).
+
+### How to run / test what's there
+
+```sh
+pnpm install
+pnpm -r typecheck                                 # all green
+pnpm lint                                         # all green
+pnpm --filter @testa-platform/edge test           # 82 passed
+pnpm --filter @testa-platform/pixel test          # 128 passed
+pnpm --filter @testa-platform/pixel build         # produces dist/loader.min.js + dist/runtime.min.js
+```
+
+For ClickHouse smoke:
+```sh
+docker compose up -d clickhouse
+for f in apps/collector/db/migrations/*.sql; do
+  docker compose exec -T clickhouse clickhouse-client --multiquery < "$f"
+done
+```
+
+For collector tests: needs `bun` installed. Skipped in this session.
+
+---
+
 ## 2026-05-07 (Thu) — Phase 2 implementation sweep
 
 ### Context
