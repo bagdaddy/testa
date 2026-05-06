@@ -1,82 +1,131 @@
 # Architecture — System diagram
 
-Visual reference for the testa-platform system after all 2026-05-06 grilling decisions. Mermaid renders natively on GitHub.
+Visual reference for the testa-platform system after all 2026-05-06 grilling decisions. Mermaid renders natively on GitHub; an ASCII fallback for the system overview is provided up top so the doc is readable in any viewer.
 
 If anything in here drifts from the prose docs (`00-overview.md` … `05-rollout.md`) or the project memory entries, the prose / memory wins — this doc is updated to match, not the reverse.
 
 ---
 
-## 1. System overview
+## 1. System overview (ASCII)
+
+```
+                       ┌─────────────────────────────────────────────────────────┐
+                       │                  CUSTOMER'S SITE                         │
+                       │                  (their own origin)                      │
+                       │                                                          │
+                       │   ┌──────────────┐         ┌──────────────────────┐      │
+                       │   │  SmartCode   │ awaits  │  Pixel script        │      │
+                       │   │ hides <body> ├────────►│  loader + runtime    │      │
+                       │   └──────────────┘ load()  │  (audience, redirect,│      │
+                       │                            │   bucketing, apply)  │      │
+                       │                            └──────┬───────────────┘      │
+                       │                                   │                      │
+                       └───────────────────────────────────┼──────────────────────┘
+                                                           │
+              ┌────────────────────────────────────────────┼──────────────┐
+              │                                            │              │
+              │  GET /projects/{slug}.js                   │  POST /track │
+              │  (serve pixel from KV)                     │  (events)    │
+              ▼                                            ▼              │
+   ┌───────────────────────────────────────────────────────────────┐      │
+   │             CLOUDFLARE — per-customer Worker                  │      │
+   │             (testa-edge-{slug}, one per customer)             │      │
+   │                                                               │      │
+   │   • serve pixel from KV (project_config + bundle)             │      │
+   │   • enrich /track (geo, region, city, UA, bot filter)         │      │
+   │   • set _testa_uuid Set-Cookie (first-party in CNAME mode)    │      │
+   │   • DurableObject batch buffer (50 events / 500ms)            │      │
+   │   • HMAC-sign + POST /_ingest                                 │      │
+   └────────────────────────────┬──────────────────────────────────┘      │
+                                │                                         │
+                                │  HMAC-signed batch                      │
+                                ▼                                         │
+   ┌─────────────────────────────────────────────────────────────────┐    │
+   │              testa-platform — SHARED INFRA                      │    │
+   │                                                                 │    │
+   │   ┌──────────────┐    ┌─────────────┐    ┌──────────────────┐   │    │
+   │   │ Collector    │    │   Redis     │    │   Consumer       │   │    │
+   │   │ Bun + Hono   ├───►│ events      ├───►│   XREADGROUP →   │   │    │
+   │   │ POST /_ingest│    │ stream +    │    │   batch INSERT   │   │    │
+   │   │ HMAC verify  │    │ dedup keys  │    │   into events_   │   │    │
+   │   │ Zod validate │    │ (SETNX 10m) │    │   buffer         │   │    │
+   │   │ SETNX dedup  │    └─────────────┘    └────────┬─────────┘   │    │
+   │   │ XADD events  │                                │             │    │
+   │   └──────┬───────┘                                ▼             │    │
+   │          │                              ┌──────────────────┐    │    │
+   │          │                              │   ClickHouse     │    │    │
+   │          │  GET /api/v1/metrics/*       │   events (raw)   │    │    │
+   │          │  (read API, X-Service-Token) │     │            │    │    │
+   │          └──────────────────────────────┤     ▼            │    │    │
+   │                                         │   5 MVs          │    │    │
+   │                                         │   + fx_rates dict│    │    │
+   │                                         └────────▲─────────┘    │    │
+   │                                                  │              │    │
+   └──────────────────────────────────────────────────┼──────────────┘    │
+                                                      │                   │
+                                       ┌──────────────┴───────────────┐   │
+                                       │                              │   │
+   ┌───────────────────────────────────┼──────────────────────────────┼───┼──┐
+   │                  CROBOT (existing PHP / Laravel)                 │   │  │
+   │                                                                  │   │  │
+   │  ┌──────────────┐   ┌──────────────────────┐   ┌──────────────┐  │   │  │
+   │  │ testa-admin  │──►│ ProjectConfigObserver│──►│ CF KV PUT    │──┼─► (KV)
+   │  │ (Filament)   │   │ + Publish job        │   │              │  │   │  │
+   │  │   audience,  │   └──────────────────────┘   └──────────────┘  │   │  │
+   │  │   freq cap,  │                                                 │   │  │
+   │  │   mutex,     │   ┌──────────────────────┐   ┌──────────────┐  │   │  │
+   │  │   variations │──►│ ProvisionEdgeWorker  │──►│ wrangler     │──┼───┘  │
+   │  └──────┬───────┘   │ (per-customer deploy)│   │  deploy      │  │ (worker)
+   │         │           └──────────────────────┘   └──────────────┘  │      │
+   │         │                                                         │      │
+   │         │           ┌──────────────────────┐                      │      │
+   │         │           │ MetricsProxyController├─────────────────────┼──────┘
+   │         │           │ /api/experiments/*/   │  (proxy + 60s cache)│
+   │         │           │   metrics/*           │
+   │         │           └──────┬───────────────┘
+   │         ▼                  │
+   │   ┌──────────┐              │
+   │   │  MySQL   │◄─────────────┘ Vue dashboards
+   │   │  (leads, │  (RevenueMetrics.vue, EngagementMetrics.vue, FunnelChart.vue)
+   │   │   goals) │
+   │   └──────────┘
+   │   ▲                                                              │
+   │   │ legacy /api/leads, /api/leads/convert, /api/pixel            │
+   └───┼──────────────────────────────────────────────────────────────┘
+       │
+       └── customer's site posts here directly (drop-in compat with 3.6)
+```
+
+**Key invariants:**
+
+- Every customer gets their own CF Worker (`testa-edge-{slug}`). Crobot's `ProvisionEdgeWorker` deploys it at signup. No technical rate limiting; crobot's monthly lead quota is the only cap.
+- The pixel decides everything — URL match, audience, variation, redirect target. The edge worker is a thin gateway: serve, enrich, batch, HMAC, forward.
+- Only the collector talks to ClickHouse. Crobot reads metrics through `MetricsProxyController` → collector read API.
+- Customer's site keeps hitting `/api/leads` etc. exactly as today; CH events accumulate alongside, MySQL stays the source of truth for legacy dashboards through the cutover.
+
+---
+
+## 1b. System overview (Mermaid)
+
+Same shape as the ASCII above, just rendered if your viewer supports Mermaid.
 
 ```mermaid
-flowchart TB
-  subgraph CUSTOMER["Customer's site (their own origin)"]
-    SC["SmartCode<br/>(sync, hides &lt;body&gt;)"]
-    PIXEL["Pixel script<br/>loader + runtime"]
-    SC -.->|"awaits _testa.load()"| PIXEL
-  end
-
-  subgraph CF["Cloudflare (per-customer worker)"]
-    EDGE["Edge worker<br/>testa-edge-{slug}"]
-    DO["BatchBuffer<br/>(DurableObject)"]
-    KV_PC[("KV: project_config:*")]
-    KV_BUNDLE[("KV: integration_bundle:*")]
-    EDGE --> DO
-    EDGE --> KV_PC
-    EDGE --> KV_BUNDLE
-  end
-
-  subgraph PLATFORM["testa-platform shared infra"]
-    COLLECTOR_HTTP["Collector HTTP<br/>Bun + Hono<br/>POST /_ingest"]
-    COLLECTOR_FX["Collector FX sync<br/>(Frankfurter→KV)"]
-    REDIS[("Redis<br/>events stream + dedup keys")]
-    CONSUMER["Consumer process<br/>XREADGROUP→CH"]
-    CH[("ClickHouse<br/>events + 5 MVs + fx_rates dict")]
-    COLLECTOR_HTTP --> REDIS
-    REDIS --> CONSUMER
-    CONSUMER --> CH
-    COLLECTOR_FX -.->|"daily pull"| CH
-  end
-
-  subgraph CROBOT["crobot (existing PHP / Laravel app)"]
-    ADMIN["testa-admin<br/>(Filament ProjectResource)"]
-    OBSERVER["ProjectConfigObserver<br/>+ PublishProjectConfigToKV job"]
-    PROVISION["ProvisionEdgeWorker job<br/>(per-customer worker deploy)"]
-    PROXY["MetricsProxyController<br/>(/api/experiments/*/metrics/*)"]
-    LEGACY_API["Legacy /api/leads<br/>/api/leads/convert<br/>/api/pixel"]
-    MYSQL[("MySQL<br/>projects, leads, goals")]
-    ADMIN --> OBSERVER
-    ADMIN --> PROVISION
-    ADMIN --> MYSQL
-    OBSERVER --> MYSQL
-    LEGACY_API --> MYSQL
-    PROXY --> MYSQL
-  end
-
-  subgraph DASH["Dashboards (Vue inside crobot)"]
-    VUE["RevenueMetrics.vue<br/>EngagementMetrics.vue<br/>FunnelChart.vue"]
-  end
-
-  CUSTOMER -->|"GET /projects/{slug}.js"| EDGE
-  CUSTOMER -->|"POST /track (events)"| EDGE
-  CUSTOMER -->|"legacy /api/leads etc."| LEGACY_API
-  EDGE -->|"HMAC POST /_ingest"| COLLECTOR_HTTP
-  PROVISION -.->|"wrangler deploy"| EDGE
-  OBSERVER -->|"PUT KV value"| KV_PC
-  VUE --> PROXY
-  PROXY -->|"X-Service-Token<br/>GET /api/v1/metrics/*"| COLLECTOR_HTTP
-  COLLECTOR_HTTP -.->|"reads MVs + fx_rates"| CH
-
-  classDef customer fill:#e3f2fd,stroke:#1565c0
-  classDef cloudflare fill:#fff3e0,stroke:#e65100
-  classDef platform fill:#e8f5e9,stroke:#2e7d32
-  classDef crobot fill:#f3e5f5,stroke:#6a1b9a
-  classDef vue fill:#fce4ec,stroke:#ad1457
-  class SC,PIXEL customer
-  class EDGE,DO,KV_PC,KV_BUNDLE cloudflare
-  class COLLECTOR_HTTP,COLLECTOR_FX,REDIS,CONSUMER,CH platform
-  class ADMIN,OBSERVER,PROVISION,PROXY,LEGACY_API,MYSQL crobot
-  class VUE vue
+flowchart LR
+  PIXEL[Pixel] --> EDGE[Edge worker<br/>per-customer]
+  SC[SmartCode] -.->|awaits _testa.load| PIXEL
+  EDGE --> KV[(KV)]
+  EDGE -->|HMAC batch| COL[Collector /_ingest]
+  COL -->|SETNX + XADD| RD[(Redis stream)]
+  RD --> CN[Consumer]
+  CN --> CH[(ClickHouse)]
+  ADMIN[testa-admin] --> OBS[Publish job]
+  OBS -->|PUT| KV
+  ADMIN --> PROV[ProvisionEdgeWorker]
+  PROV -.->|wrangler deploy| EDGE
+  VUE[Vue dashboards] --> PROXY[MetricsProxy]
+  PROXY -->|X-Service-Token| COL
+  COL -.->|reads| CH
+  PIXEL -.->|legacy /api/leads| MYSQL[(crobot MySQL)]
 ```
 
 **Key invariants** baked into this diagram:
@@ -227,44 +276,57 @@ flowchart LR
 
 ## 6. Pixel internals (apps/pixel)
 
+Two parts: a thin sync loader and a deferred runtime.
+
+**ASCII tree of source files:**
+
+```
+apps/pixel/src/
+├── loader.ts                     sync, ~5KB, inline in HTML response
+│   ├── queue.ts                  window._testa stub: track/consent/load/navigate
+│   └── monkey-patch.ts           history.pushState/replaceState patch (idempotent)
+│
+└── runtime/                      defer, ~30-40KB, loaded after loader
+    ├── index.ts                  composition root
+    ├── lifecycle.ts              hydrate queue, run experiment cycle, fire _testa.load()
+    ├── cookies.ts                _testa_uuid/_ses/_exp/_excl/_user/_freq_*/_mutex_*
+    ├── consent.ts                state machine + cmp:consent-changed listener
+    ├── spa.ts                    consume _testa:locationchange, debounce 50ms,
+    │                             canonical URL diff, bfcache re-install
+    ├── events.ts                 public track/trackPurchase, auto-emit page_view + experiment_view
+    ├── network/
+    │   ├── outbox.ts             IndexedDB FIFO outbox (~500 events bound)
+    │   ├── transport.ts          fetch keepalive + sendBeacon fallback on pagehide
+    │   ├── health.ts             _pixel_health synthetic event (hourly)
+    │   └── uuid7.ts              UUIDv7 generator for event_id
+    ├── rules/
+    │   ├── audience.ts           AudienceCondition tree walker (geo/device/time/page/visitor)
+    │   ├── custom-js.ts          sandboxed AST evaluator (no eval, fixed context)
+    │   └── legacy.ts             3.3.x/3.6 flat targeting[] compat
+    ├── experiments/
+    │   ├── traffic.ts            xxhash32 bucketing + frequency_cap + mutex_group guards
+    │   ├── apply/                css, html, text, attribute, js
+    │   └── redirect/             decide, execute, loop-guard, cross-domain, spa-path
+    └── legacy.ts                 window.Analytica.* mirroring + legacy /api/leads
+```
+
+**Key flow:** loader monkey-patches history early, runtime hydrates queue, runs the experiment cycle (audience eval → bucketing → apply / redirect), fires `_testa.load()`. SPA route changes re-run the experiment cycle (without re-init). Events go through the outbox always.
+
+**Mermaid (simpler view):**
+
 ```mermaid
-flowchart TB
-  subgraph SYNC["loader.ts (sync, &lt;5KB, inline)"]
-    QUEUE["queue stub: window._testa<br/>(track/consent/identify/navigate/load)"]
-    PATCH["history.pushState +<br/>replaceState monkey-patch<br/>(idempotent, microtask dispatch)"]
-  end
-
-  subgraph DEFER["runtime/index.ts (defer, ~30-40KB)"]
-    LIFECYCLE["lifecycle: hydrate queue<br/>fire _testa.load() once ready"]
-    COOKIES["cookies.ts<br/>_testa_uuid/_ses/_exp/_excl/_user<br/>+ _testa_freq_*/_testa_mutex_*"]
-    CONSENT["consent.ts<br/>state machine"]
-    SPA["spa.ts<br/>50ms debounce, canonical URL diff,<br/>bfcache re-install"]
-    NETWORK["network/<br/>outbox.ts (IDB FIFO 500)<br/>transport.ts (fetch keepalive)<br/>health.ts (_pixel_health hourly)"]
-    EVENTS["events.ts<br/>track, trackPurchase,<br/>auto-emit page_view/exp_view"]
-    AUDIENCE["rules/audience.ts<br/>AudienceCondition tree walker<br/>(geo, device, time, page, visitor)"]
-    CUSTOMJS["rules/custom-js.ts<br/>sandboxed AST evaluator<br/>(no eval)"]
-    LEGACYRULE["rules/legacy.ts<br/>3.3.x/3.6 targeting[] compat"]
-    TRAFFIC["experiments/traffic.ts<br/>xxhash32 deterministic bucketing<br/>+ freq_cap + mutex_group guards"]
-    APPLY["experiments/apply/<br/>css/html/text/attribute/js"]
-    REDIRECT["experiments/redirect/<br/>decide/execute/loop-guard/<br/>cross-domain/spa-path"]
-    LEGACY_GLOBAL["legacy.ts<br/>window.Analytica.* mirroring<br/>+ legacy /api/leads calls"]
-  end
-
-  QUEUE -.->|"replays into"| EVENTS
-  PATCH -.->|"_testa:locationchange"| SPA
-  LIFECYCLE --> COOKIES
-  LIFECYCLE --> CONSENT
-  LIFECYCLE --> NETWORK
-  LIFECYCLE --> AUDIENCE
-  LIFECYCLE --> TRAFFIC
-  LIFECYCLE --> LEGACY_GLOBAL
-  AUDIENCE --> CUSTOMJS
-  AUDIENCE --> LEGACYRULE
-  TRAFFIC --> APPLY
-  TRAFFIC --> REDIRECT
-  EVENTS --> NETWORK
-  REDIRECT -.->|"may dispatch"| SPA
-  SPA -.->|"re-runs"| LIFECYCLE
+flowchart LR
+  LOADER[loader.ts<br/>queue + history patch] --> RUNTIME[runtime/index.ts]
+  RUNTIME --> COOKIES[cookies]
+  RUNTIME --> CONSENT[consent]
+  RUNTIME --> RULES[rules<br/>audience+customJS]
+  RULES --> TRAFFIC[traffic<br/>xxhash32 + freq+mutex]
+  TRAFFIC --> APPLY[apply<br/>css/html/text/attr/js]
+  TRAFFIC --> REDIRECT[redirect<br/>decide+execute+stitch]
+  RUNTIME --> NET[network<br/>outbox+transport+health]
+  RUNTIME --> LEG[legacy<br/>Analytica.*]
+  RUNTIME -.->|fires once| LOAD[_testa.load resolves]
+  PATCH[history patch] -.->|_testa:locationchange| SPA[spa.ts] -.->|re-runs cycle| RUNTIME
 ```
 
 ---
