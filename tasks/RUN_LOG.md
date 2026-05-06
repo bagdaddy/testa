@@ -4,6 +4,78 @@ Routine / agent session log. Most recent at top. Each entry: what was picked up,
 
 ---
 
+## 2026-05-07 (Thu) — Phase 2 implementation sweep
+
+### Context
+
+User said "merge all to main, no separate PRs needed, continue working." Authorized direct fast-forward merges and broad autonomous progress.
+
+### Merged into main this session (10 PRs)
+
+In order:
+
+| PR | What | Tip on main |
+|---|---|---|
+| `feat/events-schema-extensions` | Q6 schema decision applied (rename ts→client_ts, ingested_at→server_ts; add viewport/utm/region_subdivision/city) | `3eead1b` |
+| `docs/capture-remaining-grilling` | SETNX dedup + per-customer workers + freq cap + xxhash32 captured in arch docs | `cda8973` |
+| `docs/task-file-corrections` | Phase 1.4 + 3.8 corrected for grilling decisions | `67267e4` |
+| `chore/run-log-update-3` | Previous RUN_LOG | `aa5d0ad` |
+| `docs/architecture-system-diagram` | 5 PNG-rendered Mermaid diagrams (after SVG-blocked feedback) | `662a1bd` |
+| `feat/2.2-edge-cookies` | first-party cookie module (parseCookies, getOrCreateVisitorId, domainForHost, evictUuidCookie) | `b3a4aa5` |
+| `feat/2.3-edge-enrich` | geo + UA enrichment (UAParser + truncateIp + region_subdivision/city from cf) | `a377fcb` |
+| `feat/2.7-kv-serve` | GET /projects/:slug.js — KV-backed pixel assembly + cfPrefill + ETag + XSS-safe JSON | `8e73c28` |
+| `feat/2.4-bot-filter` | bot signal heuristics (verifiedBot drop + headless / empty UA / no-accept-language / bad-ASN tagging) | `6cba0a7` |
+| `feat/2.6-ingest-forward` | HMAC-SHA256 sign + POST /_ingest with retry/poison semantics; wired BatchBuffer's flushFn | `f55434d` |
+
+Plus 2 small `chore` commits marking task files done.
+
+### Phase 2 status
+
+| Task | Status |
+|---|---|
+| 2.1 Hono router | ✅ done |
+| 2.2 Cookies | ✅ done (this session) |
+| 2.3 Enrichment | ✅ done (this session) |
+| 2.4 Bot filter | ✅ done (this session) |
+| 2.5 BatchBuffer DO | ✅ done |
+| 2.6 HMAC + POST | ✅ done (this session) |
+| 2.7 KV serve | ✅ done (this session) |
+| 2.8 Tests (miniflare + integration) | pending — all blockers now done |
+| 2.9 wrangler deploy to staging | PAUSE for human |
+
+**Phase 2 implementation modules are 100% complete.** What remains: integration testing (2.8) and a /track POST handler that wires cookies → enrich → bot-filter → BatchBuffer.add. The wiring isn't a scoped task on its own — natural fit for Phase 2.8 since miniflare can verify the full chain end-to-end.
+
+### Test stats
+
+- Edge worker: **82 tests passing** (was 14 at start of this session). Coverage spans cookies, enrichment, bot filter, KV serve, HMAC ingest, BatchBuffer DO.
+- Pixel + shared-types: pass.
+- Collector: bun-dependent (still not installed locally).
+
+### What's next on the queue
+
+1. **2.8 Edge integration tests** (miniflare + /track end-to-end). Naturally pulls in the /track POST wiring.
+2. **1.4 Collector /_ingest route** — implementation; HMAC verify + Zod + SETNX-before-XADD per the captured task spec. Bun-dependent.
+3. **1.5 Consumer worker** — XREADGROUP → CH INSERT loop. Bun-dependent.
+4. **1.2 Migration runner** — bun script to apply the SQL migrations and track in `_migrations`. Bun-dependent.
+5. **1.6 FX rates sync** — needs cron-host grilling (CF Cron Trigger? Bun setInterval? Sidecar?).
+6. **Phase 3 implementation** — pixel runtime; 15 task files already authored.
+7. **Phase 4/5/6 task corpus authoring** — meta-task; user input needed on stats methodology + crobot specifics.
+
+### Patterns learned this session
+
+A few Workers / TS edge cases worth remembering for future tasks:
+
+- `Request.cf` is **read-only** in the Workers runtime. `Object.assign(req, { cf })` throws. Take cf as a separate function arg in pure functions; build it from `request.cf` only in the route handler.
+- Embedding JSON inside a `<script>` tag: must escape `</script` and `<!--` to defend against XSS via poisoned KV values. `safeJson()` helper in `apps/edge/src/serve/render.ts`.
+- `*/` inside JSDoc block comments terminates the comment early. Don't write `viewport/utm_*/tracker_version` in JSDoc — TS parser will eat half your file.
+- biome's `noNonNullAssertion` rule fires on `[...set][0]!` test idioms; use an explicit guard with `throw` instead.
+
+### Stopping point
+
+Stopping here so the user can review the Phase 2 work in main before more changes pile on. Phase 2 implementation modules are complete; integration / wiring is the next natural step but it'll change shared route code and benefits from a review pass first.
+
+---
+
 ## 2026-05-06 (Wed) — late, after second grilling session + autonomous continuation
 
 ### What happened
