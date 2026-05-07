@@ -4,6 +4,129 @@ Routine / agent session log. Most recent at top. Each entry: what was picked up,
 
 ---
 
+## 2026-05-07 (Thu) — Phase 3 continuation (lifecycle wired end-to-end)
+
+### Context
+
+User said "continue" with no other input. Worked through the modules that turn the standalone pieces (loader, cookies, consent, audience, traffic) into a coherent runtime that mutates the customer's DOM and exposes the legacy compat surface.
+
+### Merged into main this session (4 implementation + 1 status)
+
+| PR | What | Tip on main |
+|---|---|---|
+| `feat/3.2-runtime-entry` | Composition root: drains queue, wires live API, runs first cycle, fires `_testa.load()`. Strict-consent gating. Error-isolated phases routing failures to `_pixel_health`. | `c64f9cd` |
+| `feat/3.5-spa-nav` | 50 ms debounce + canonical URL diff (drops `_testa_*` / `_tu`, sorts query keys, lowercases host). Listens to `popstate` + `hashchange`. Per-project `spa.hash_routes` flag. Throw-isolated. | `87270b2` |
+| `feat/3.9-variation-apply` | CSS / HTML / text / attribute / JS appliers. MutationObserver for late-arriving selectors. Idempotent CSS via global `<style>` tags. JS via `new Function(code)()` (intentional). Pipeline: `audience → assign → applyVariation → DOM`. | `1838ff7` |
+| `feat/3.12-legacy-globals` | Full `window.Analytica.*` surface (every constant + mutable field per the inventory) + 3.6-parity event emitter (history replay, dedup, error isolation). Fires `variation_assigned` + `variation_applied`. | `b8fa5bc` |
+| `chore/phase3-batch-3-status` | Marks 3.2 / 3.5 / 3.9 / 3.12 done; updates README. | _this commit_ |
+
+### Phase 3 status
+
+| Task | Status |
+|---|---|
+| 3.1 Loader + queue + monkey-patch | ✅ done |
+| 3.2 Runtime lifecycle | ✅ done (this session) |
+| 3.3 Cookies | ✅ done |
+| 3.4 Consent | ✅ done |
+| 3.5 SPA navigation | ✅ done (this session) |
+| 3.6 IDB outbox + transport + `_pixel_health` | pending — events still queue in-memory only |
+| 3.7 Audience rule engine | 🟡 in_progress (visitor.custom AST deferred) |
+| 3.8 Traffic + freq + mutex | ✅ done |
+| 3.9 Variation apply | ✅ done (this session) |
+| 3.10 Redirect engine | pending — competitive bar feature |
+| 3.11 SPA redirect harness | pending |
+| 3.12 `window.Analytica.*` legacy | ✅ done (this session) |
+| 3.13 Legacy `/api/leads` HTTP calls | pending |
+| 3.14 Bundle build | partial |
+| 3.15 Test coverage | accumulating |
+
+### What works end-to-end now
+
+A customer site that loads the pixel will:
+
+1. Get `window._testa` queue stub immediately (loader, sync).
+2. History `pushState`/`replaceState` patched + dispatching `_testa:locationchange`.
+3. Once runtime hydrates: drains queue, replaces stubs with live impls.
+4. Reads `window.cfPrefill.project` for the project config.
+5. For each active experiment:
+   - Builds EvalContext (page, visitor cookies, geo from `cfGeoData`, device from UA, time).
+   - Evaluates the audience tree if present.
+   - Bucketing via xxhash32 + freq cap + mutex group guards.
+   - Applies the chosen variation's `changes[]` (CSS/HTML/text/attr/JS) — with MutationObserver for late-rendered DOM.
+   - Fires `experiment_view` (queued), legacy `variation_assigned` + `variation_applied` events.
+6. Resolves `_testa.load()`.
+7. SPA route changes re-run the cycle (debounced, canonical-URL-diffed).
+8. `window.Analytica.*` is fully populated; customer code listening on `eventEmitter.on('variation_applied', ...)` fires correctly.
+
+The one missing link is **the network**: events queue in `_pendingEvents` (in-memory) rather than going to `/track`. Phase 3.6 (IDB outbox + transport) replaces this sink. Without it, no data reaches the collector — but the rest of the pixel works correctly in a browser.
+
+### Pixel test stats
+
+Started this session at 128 tests. Now at **218 passing** across:
+loader, monkey-patch, cookies, storage, consent, audience, xxhash, traffic, lifecycle, spa, url-canonical, variation apply, legacy globals, eventEmitter.
+
+Edge worker still at 82.
+
+### How to actually see this in a browser
+
+```sh
+pnpm --filter @testa-platform/pixel build
+```
+
+The two artifacts in `apps/pixel/dist/` (`loader.min.js` + `runtime.min.js`) can be served from any local web server. To smoke-test:
+
+```html
+<!doctype html>
+<html>
+<head>
+  <script>
+    window.cfPrefill = {
+      project: {
+        project_id: 1, slug: 'demo', integration_version: '4.0', consent_mode: 'aware',
+        published_at: '2026-05-07T00:00:00Z', config_hash: 'abc',
+        experiments: [{
+          experiment_id: 17, status: 'active', traffic_allocation: 100,
+          rules: [], goals: [],
+          variations: [
+            { variation_id: 100, weight: 50, changes: [{ type: 'css', selector: '.cta', styles: { background: '#ff6600', color: '#fff' } }] },
+            { variation_id: 200, weight: 50, changes: [{ type: 'css', selector: '.cta', styles: { background: '#0066ff', color: '#fff' } }] }
+          ]
+        }]
+      },
+      env: 'development'
+    };
+  </script>
+  <script src="/loader.min.js"></script>
+  <script src="/runtime.min.js" defer></script>
+</head>
+<body>
+  <button class="cta">Buy</button>
+  <script>
+    window._testa.load().then(() => console.log('pixel ready', window.Analytica));
+  </script>
+</body>
+</html>
+```
+
+Visit it; the button should be orange or blue depending on bucketing. `window.Analytica` should have all the expected fields. `_testa.q` should be empty after hydrate.
+
+### Remaining priorities
+
+1. **3.6 IDB outbox + transport** — only thing keeping events from leaving the browser. Once it lands, the pixel → edge → collector path is complete.
+2. **3.10 redirect engine** — the user-flagged competitive bar feature. Big task; uses everything that's now in place.
+3. **3.13 legacy `/api/leads`** — needed for crobot legacy dashboards to keep working.
+4. **3.15 test coverage** — already at ~80% via per-task tests; adding integration tests would close the loop.
+
+### Things the runtime does not yet do
+
+- Send events anywhere (3.6).
+- Redirect (3.10).
+- Call `/api/leads` (3.13).
+- Build with hash-named runtime URL (3.14).
+- Have a Playwright e2e suite (3.15).
+
+---
+
 ## 2026-05-07 (Thu) — Phase 3 implementation sweep (pixel)
 
 ### Context
