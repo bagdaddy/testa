@@ -35,6 +35,7 @@ import {
   assign,
   recordExposure,
 } from './experiments/traffic.ts';
+import { fireEvent, installLegacy, publishLoaded } from './legacy/index.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
 import { installSpaHandler } from './spa.ts';
 
@@ -88,6 +89,15 @@ export function hydrate(): void {
   ensurePixelDebug();
   applyConsentMode();
 
+  guardedInit('legacy_globals', () => {
+    installLegacy({
+      pushEvent: (name, data) => {
+        // Customer-fired custom events route through the same `track` pipe
+        // as `_testa.track()`, so dashboards see them.
+        track(name, (data as Record<string, unknown> | undefined) ?? {});
+      },
+    });
+  });
   guardedInit('cmp_listener', () => consentMod.installCmpListener());
   guardedInit('live_api', installLiveApi);
   guardedInit('spa_listener', installSpaListener);
@@ -287,6 +297,17 @@ export function runExperimentCycle(): void {
       const teardowns = applyVariation(result.variationId, variation.changes);
       _activeTeardowns.push(...teardowns);
     }
+
+    // Fire 3.6-compatible legacy events (variation_assigned + variation_applied)
+    // so customer code listening via Analytica.eventEmitter.on(...) keeps working.
+    fireEvent('variation_assigned', {
+      experiment: expConfig.experiment_id,
+      variation: result.variationId,
+    });
+    fireEvent('variation_applied', {
+      experiment: expConfig.experiment_id,
+      variation: result.variationId,
+    });
   }
 
   pushDebug({
@@ -399,6 +420,7 @@ function applyConsentMode(): void {
 // ─── lifecycle plumbing ────────────────────────────────────────────────────
 
 function fireReady(): void {
+  publishLoaded();
   const stub = window._testa;
   stub?._loaded?.();
 }
