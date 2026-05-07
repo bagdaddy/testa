@@ -173,6 +173,34 @@ describe('hydrate — error isolation', () => {
   });
 });
 
+describe('runExperimentCycle — DOM mutation (3.9 integration)', () => {
+  it("applies the chosen variation's CSS to the page", () => {
+    installQueue();
+    const config = fixture();
+    document.body.innerHTML = '<button class="cta">Buy</button>';
+    // Both variations have a CSS change so the cycle mutates regardless of bucketing.
+    firstExp(config).variations = [
+      {
+        variation_id: 100,
+        weight: 50,
+        changes: [{ type: 'css', selector: '.cta', styles: { color: 'red' } }],
+      },
+      {
+        variation_id: 200,
+        weight: 50,
+        changes: [{ type: 'css', selector: '.cta', styles: { color: 'blue' } }],
+      },
+    ];
+    (window as unknown as { cfPrefill: unknown }).cfPrefill = { project: config };
+    hydrate();
+
+    const styleTag = document.querySelector('style[data-testa-css]');
+    expect(styleTag).not.toBeNull();
+    expect(styleTag?.textContent).toContain('.cta');
+    expect(styleTag?.textContent).toMatch(/color: (red|blue)/);
+  });
+});
+
 describe('runExperimentCycle — happy path', () => {
   it('assigns a variation, fires experiment_view, persists cookie', () => {
     installQueue();

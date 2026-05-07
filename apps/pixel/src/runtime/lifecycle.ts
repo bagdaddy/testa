@@ -28,6 +28,7 @@ import type {
 import type { ConsentState } from '@testa-platform/shared-types';
 import * as consentMod from './consent.ts';
 import * as cookies from './cookies.ts';
+import { type Teardown, applyVariation } from './experiments/apply/index.ts';
 import {
   type AssignResult,
   type Experiment,
@@ -72,6 +73,8 @@ declare global {
 const MAX_DEBUG_ENTRIES = 50;
 let _pendingEvents: PendingEvent[] = [];
 let _alreadyHydrated = false;
+/** DOM-watching teardowns from the previous cycle's appliers; disposed at the start of each cycle. */
+let _activeTeardowns: Teardown[] = [];
 
 /**
  * Top-level entry. Idempotent. Errors anywhere in the pipeline are
@@ -237,6 +240,17 @@ export function runExperimentCycle(): void {
   const project = readProject();
   if (!project) return;
 
+  // Tear down DOM watchers from the previous cycle (SPA route change leaves
+  // stale MutationObservers otherwise).
+  for (const t of _activeTeardowns) {
+    try {
+      t();
+    } catch {
+      // ignore
+    }
+  }
+  _activeTeardowns = [];
+
   const ctx = buildEvalContext();
   const stats = { matched: 0, excluded: 0 };
 
@@ -266,7 +280,13 @@ export function runExperimentCycle(): void {
       variation_id: result.variationId,
     });
 
-    // Phase 3.9: apply variation.changes here. For now no-op.
+    // Apply the chosen variation's DOM changes (Phase 3.9). The redirect
+    // change type is no-op here — Phase 3.10 owns redirects.
+    const variation = expConfig.variations.find((v) => v.variation_id === result.variationId);
+    if (variation && variation.changes.length > 0) {
+      const teardowns = applyVariation(result.variationId, variation.changes);
+      _activeTeardowns.push(...teardowns);
+    }
   }
 
   pushDebug({
@@ -429,6 +449,14 @@ export function __resetForTests(): void {
   _alreadyHydrated = false;
   _spaUninstall?.();
   _spaUninstall = null;
+  for (const t of _activeTeardowns) {
+    try {
+      t();
+    } catch {
+      // ignore
+    }
+  }
+  _activeTeardowns = [];
 }
 
 // Audience type re-export for callers that don't want to depend on
