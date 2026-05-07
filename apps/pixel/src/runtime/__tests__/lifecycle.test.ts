@@ -231,18 +231,25 @@ describe('runExperimentCycle — happy path', () => {
     expect(events.some((e) => e.name === 'experiment_view')).toBe(true);
   });
 
-  it('runs the cycle on _testa:locationchange', () => {
+  it('runs the cycle on _testa:locationchange (after 50ms debounce + URL change)', () => {
     installQueue();
     (window as unknown as { cfPrefill: unknown }).cfPrefill = { project: fixture() };
     hydrate();
 
     const eventsAfterFirst = __getPendingEventsForTests().length;
+    // Actually change the URL so the canonical-URL diff sees a transition.
+    window.history.replaceState({}, '', '/different-page');
     window.dispatchEvent(new CustomEvent('_testa:locationchange'));
-
-    // Cookie was already set; the second cycle uses cookie-first lookup, so
-    // experiment_view re-fires (we don't dedupe across navigations in 3.2).
-    const eventsAfterSecond = __getPendingEventsForTests().length;
-    expect(eventsAfterSecond).toBeGreaterThan(eventsAfterFirst);
+    // Wait out the 50ms debounce (no fake timers in this test file).
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        // Cookie was already set; the second cycle uses cookie-first lookup, so
+        // experiment_view re-fires (we don't dedupe across navigations in 3.2).
+        const eventsAfterSecond = __getPendingEventsForTests().length;
+        expect(eventsAfterSecond).toBeGreaterThan(eventsAfterFirst);
+        resolve();
+      }, 80);
+    });
   });
 
   it('records exposure when frequency_cap is configured', () => {

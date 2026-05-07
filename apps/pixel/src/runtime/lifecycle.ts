@@ -35,6 +35,7 @@ import {
   recordExposure,
 } from './experiments/traffic.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
+import { installSpaHandler } from './spa.ts';
 
 const LOCATIONCHANGE_EVENT = '_testa:locationchange';
 
@@ -202,17 +203,21 @@ export function __clearPendingEventsForTests(): void {
   _pendingEvents = [];
 }
 
-// ─── SPA listener ──────────────────────────────────────────────────────────
+// ─── SPA listener (debounce + canonical URL diff via spa.ts) ───────────────
+
+let _spaUninstall: (() => void) | null = null;
 
 function installSpaListener(): void {
-  window.addEventListener(LOCATIONCHANGE_EVENT, onLocationChange);
-}
-
-function onLocationChange(): void {
-  // Phase 3.5 will add 50ms debounce + canonical-URL diff. For now:
-  // re-run the cycle every time the loader's monkey-patch fires.
-  guardedInit('spa_cycle', () => {
-    runExperimentCycle();
+  // Idempotent: dispose any prior listener first.
+  _spaUninstall?.();
+  _spaUninstall = installSpaHandler({
+    onTransition: () => {
+      guardedInit('spa_cycle', () => {
+        runExperimentCycle();
+      });
+    },
+    // TODO(phase 3.x admin UI): wire `spa.hash_routes` per-project setting.
+    includeHash: false,
   });
 }
 
@@ -422,6 +427,8 @@ function guardedInit(phase: string, fn: () => void): void {
 export function __resetForTests(): void {
   _pendingEvents = [];
   _alreadyHydrated = false;
+  _spaUninstall?.();
+  _spaUninstall = null;
 }
 
 // Audience type re-export for callers that don't want to depend on
