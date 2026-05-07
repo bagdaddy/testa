@@ -4,6 +4,8 @@
  * served pixel runtime as `window.cfPrefill.project`.
  */
 
+import type { AudienceCondition } from './audience.ts';
+
 export type IntegrationVersion = '3.4' | '3.6' | '4.0';
 
 export type ConsentMode = 'aware' | 'strict';
@@ -34,6 +36,12 @@ export interface ExperimentConfig {
   goals: GoalConfig[];
   /** 0..100 share of eligible visitors who participate. Remaining are excluded. */
   traffic_allocation: number;
+  /** Optional audience targeting tree (Tier 1+2 dimensions). 4.0 only. */
+  audience?: AudienceCondition;
+  /** Optional per-experiment frequency cap. 4.0 only. */
+  frequency_cap?: { max: number; window: 'session' | 'day' | 'week' | 'month' };
+  /** Optional mutex-group name. Visitor in ≤1 active experiment per group. 4.0 only. */
+  mutex_group?: string;
 }
 
 export interface ExperimentRule {
