@@ -58,6 +58,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @testa-platform/pixel test
       - run: pnpm --filter @testa-platform/pixel build
+      - run: pnpm --filter @testa-platform/pixel check:size
 
   test-edge:
     name: Test apps/edge

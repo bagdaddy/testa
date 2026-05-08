@@ -1,10 +1,12 @@
 /**
  * Tracker pixel runtime entry point.
  *
- * Hydrates the queue created by the loader stub, initializes runtime modules,
- * applies experiments, and starts emitting tracking events.
- *
- * Phase 0.2 (skeleton). Real implementation across Phase 3.1 -> 3.11.
+ * Loaded as `<script defer src="/projects/:slug.js?bundle=runtime">` after the
+ * inline loader stub installs `window._testa`. Hydration drains the queue,
+ * wires legacy globals, sets up CMP + SPA listeners, runs the first
+ * experiment cycle, and starts the network transport.
  */
 
-export {};
+import { hydrate } from './lifecycle.ts';
+
+hydrate();

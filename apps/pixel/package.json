@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
+    "check:size": "node esbuild.config.mjs && node scripts/check-bundle-size.mjs",
     "clean": "rm -rf dist .turbo coverage playwright-report test-results"
   },
   "devDependencies": {
