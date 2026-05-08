@@ -21,9 +21,11 @@
 import type {
   AudienceCondition,
   ExperimentConfig,
+  PixelEvent,
   ProjectConfig,
 } from '@testa-platform/shared-types';
 import type { ConsentState } from '@testa-platform/shared-types';
+import { TRACKER_VERSION } from '../version.ts';
 import * as consentMod from './consent.ts';
 import * as cookies from './cookies.ts';
 import { type Teardown, applyVariation } from './experiments/apply/index.ts';
@@ -38,6 +40,7 @@ import { initOutbox, enqueue as outboxEnqueue } from './network/outbox.ts';
 import { installTransport, notifyEnqueue } from './network/transport.ts';
 import { uuidv7 } from './network/uuid7.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
+import { getOrCreateSessionId } from './session.ts';
 import { installSpaHandler } from './spa.ts';
 
 const LOCATIONCHANGE_EVENT = '_testa:locationchange';
@@ -209,12 +212,122 @@ function replayCall(call: unknown): void {
 export function track(name: string, props?: Record<string, unknown>): void {
   if (consentMod.consent.isHeld()) return;
   const ts = Date.now();
-  const event_id = uuidv7(ts);
-  const payload = JSON.stringify({ event_id, name, props: props ?? {}, ts });
+  const event = buildPixelEvent(name, props ?? {}, ts);
+  const payload = JSON.stringify(event);
   _pendingEvents.push({ name, props: props ?? {}, ts });
-  void outboxEnqueue({ event_id, payload }).then(() => {
+  void outboxEnqueue({ event_id: event.event_id, payload }).then(() => {
     notifyEnqueue();
   });
+}
+
+/**
+ * Build a wire-format PixelEvent. Lifts well-known props (experiment_id,
+ * variation_id, value_native, currency, order_id, items_count) onto top-level
+ * fields so the collector can index them without poking into the props bag;
+ * everything else stays in `props`.
+ */
+function buildPixelEvent(name: string, props: Record<string, unknown>, ts: number): PixelEvent {
+  const project = readProject();
+  const visitorId = cookies.getUuid() ?? generateEphemeralVisitorId();
+  const sessionId = getOrCreateSessionId();
+  const consentState = consentMod.consent.getState();
+
+  const { lifted, rest } = liftReservedProps(props);
+  const utms = readUtms();
+
+  const event: PixelEvent = {
+    event_id: uuidv7(ts),
+    event_name: name,
+    client_ts: ts,
+    project_id: project?.project_id ?? 0,
+    visitor_id: visitorId,
+    session_id: sessionId,
+    url: typeof location !== 'undefined' ? location.href : '',
+    consent_state: consentState,
+    tracker_version: TRACKER_VERSION,
+    viewport_w: typeof window !== 'undefined' ? window.innerWidth || 0 : 0,
+    viewport_h: typeof window !== 'undefined' ? window.innerHeight || 0 : 0,
+    ...(typeof document !== 'undefined' && document.referrer
+      ? { referrer: document.referrer }
+      : {}),
+    ...lifted,
+    ...utms,
+    ...(Object.keys(rest).length > 0 ? { props: coerceProps(rest) } : {}),
+  };
+  return event;
+}
+
+interface LiftedProps {
+  experiment_id?: number;
+  variation_id?: number;
+  value_native?: number;
+  currency?: string;
+  order_id?: string;
+  items_count?: number;
+}
+
+function liftReservedProps(props: Record<string, unknown>): {
+  lifted: LiftedProps;
+  rest: Record<string, unknown>;
+} {
+  const lifted: LiftedProps = {};
+  const rest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(props)) {
+    switch (key) {
+      case 'experiment_id':
+      case 'variation_id':
+      case 'value_native':
+      case 'items_count':
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          (lifted as Record<string, number>)[key] = value;
+        }
+        break;
+      case 'currency':
+      case 'order_id':
+        if (typeof value === 'string' && value.length > 0) {
+          (lifted as Record<string, string>)[key] = value;
+        }
+        break;
+      default:
+        rest[key] = value;
+    }
+  }
+  return { lifted, rest };
+}
+
+function readUtms(): Pick<PixelEvent, 'utm_source' | 'utm_medium' | 'utm_campaign'> {
+  if (typeof location === 'undefined' || !location.search) return {};
+  const params = new URLSearchParams(location.search);
+  const out: { utm_source?: string; utm_medium?: string; utm_campaign?: string } = {};
+  const s = params.get('utm_source');
+  const m = params.get('utm_medium');
+  const c = params.get('utm_campaign');
+  if (s) out.utm_source = s;
+  if (m) out.utm_medium = m;
+  if (c) out.utm_campaign = c;
+  return out;
+}
+
+/** Coerce arbitrary prop values to PixelEvent['props'] shape (string/number/boolean/null). */
+function coerceProps(
+  input: Record<string, unknown>,
+): Record<string, string | number | boolean | null> {
+  const out: Record<string, string | number | boolean | null> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (v === null) {
+      out[k] = null;
+    } else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out[k] = v;
+    } else {
+      // Stringify objects/arrays — collector ingests as a flat scalar bag.
+      try {
+        out[k] = JSON.stringify(v);
+      } catch {
+        out[k] = String(v);
+      }
+    }
+  }
+  return out;
 }
 
 /** Test/Phase 3.6 hook: read the in-memory event queue. */
