@@ -11,13 +11,11 @@
  *   4. Run the first experiment-resolution cycle and fire `_testa.load()`.
  *
  * What this does NOT own:
- *   - Network transport (Phase 3.6 — `network/transport.ts`). Until that lands,
- *     events go to an in-memory `_pendingEvents` array exported here for
- *     observability. 3.6's hydrate hook will replace the sink.
- *   - Variation application (Phase 3.9 — `experiments/apply/`). For now the
- *     cycle assigns + records the variation_id but doesn't mutate the DOM.
- *   - SPA navigation re-eval semantics beyond "rerun cycle on locationchange"
- *     — full debounce + canonical-URL diff lives in Phase 3.5.
+ *   - Storage backend selection (lives in `network/outbox.ts`).
+ *   - HTTP retry / sendBeacon flushing (lives in `network/transport.ts`).
+ *
+ * The in-memory `_pendingEvents` mirror is kept as an inspection / test hook;
+ * the durable outbox is the source of truth for what actually leaves the page.
  */
 
 import type {
@@ -36,6 +34,9 @@ import {
   recordExposure,
 } from './experiments/traffic.ts';
 import { fireEvent, installLegacy, publishLoaded } from './legacy/index.ts';
+import { initOutbox, enqueue as outboxEnqueue } from './network/outbox.ts';
+import { installTransport, notifyEnqueue } from './network/transport.ts';
+import { uuidv7 } from './network/uuid7.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
 import { installSpaHandler } from './spa.ts';
 
@@ -101,6 +102,7 @@ export function hydrate(): void {
   guardedInit('cmp_listener', () => consentMod.installCmpListener());
   guardedInit('live_api', installLiveApi);
   guardedInit('spa_listener', installSpaListener);
+  guardedInit('network', installNetwork);
 
   // First experiment cycle. Drain queue first so any pre-runtime calls
   // (e.g. `_testa.consent('denied')` set BEFORE the loader fired) win
@@ -194,16 +196,25 @@ function replayCall(call: unknown): void {
 // ─── tracking ──────────────────────────────────────────────────────────────
 
 /**
- * Live `track()`. Until Phase 3.6 ships network transport, events queue up
- * here for inspection / Phase 3.6 to pick up.
+ * Live `track()`. Stamps the event with a UUIDv7 id, enqueues to the durable
+ * outbox, and signals the transport to flush.
  *
  * Strict-consent gating: when consent.isHeld() is true, drop the event
  * (the strict mode contract is "no tracking without explicit grant").
- * Re-firing on grant is Phase 3.6's responsibility.
+ *
+ * The in-memory `_pendingEvents` mirror is preserved as an inspection /
+ * test hook; production callers should treat the outbox as the source of
+ * truth.
  */
 export function track(name: string, props?: Record<string, unknown>): void {
   if (consentMod.consent.isHeld()) return;
-  _pendingEvents.push({ name, props: props ?? {}, ts: Date.now() });
+  const ts = Date.now();
+  const event_id = uuidv7(ts);
+  const payload = JSON.stringify({ event_id, name, props: props ?? {}, ts });
+  _pendingEvents.push({ name, props: props ?? {}, ts });
+  void outboxEnqueue({ event_id, payload }).then(() => {
+    notifyEnqueue();
+  });
 }
 
 /** Test/Phase 3.6 hook: read the in-memory event queue. */
@@ -406,6 +417,18 @@ function toTrafficExperiment(config: ExperimentConfig): Experiment {
 
 function readProject(): ProjectConfig | undefined {
   return window.cfPrefill?.project;
+}
+
+// ─── network transport ────────────────────────────────────────────────────
+
+function installNetwork(): void {
+  // Kick off async backend selection so the first track() doesn't pay it.
+  void initOutbox();
+
+  const apiUrl = window.cfPrefill?.apiUrl;
+  if (!apiUrl) return;
+  const endpoint = `${apiUrl.replace(/\/$/, '')}/track`;
+  installTransport({ endpoint });
 }
 
 // ─── consent mode ──────────────────────────────────────────────────────────
