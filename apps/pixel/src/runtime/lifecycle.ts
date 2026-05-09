@@ -25,6 +25,7 @@ import type {
   ProjectConfig,
 } from '@testa-platform/shared-types';
 import type { ConsentState } from '@testa-platform/shared-types';
+import type { TestaDebugSnapshot } from '../loader/queue.ts';
 import { TRACKER_VERSION } from '../version.ts';
 import * as consentMod from './consent.ts';
 import * as cookies from './cookies.ts';
@@ -36,9 +37,11 @@ import {
   recordExposure,
 } from './experiments/traffic.ts';
 import { fireEvent, installLegacy, publishLoaded } from './legacy/index.ts';
-import { initOutbox, enqueue as outboxEnqueue } from './network/outbox.ts';
+import { snapshot as healthSnapshot } from './network/health.ts';
+import { initOutbox, count as outboxCount, enqueue as outboxEnqueue } from './network/outbox.ts';
 import { installTransport, notifyEnqueue } from './network/transport.ts';
 import { uuidv7 } from './network/uuid7.ts';
+import { readBreadcrumbs as readRedirectBreadcrumbs } from './redirect/breadcrumbs.ts';
 import { evaluateAndApply as evaluateRedirect } from './redirect/index.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
 import { getOrCreateSessionId } from './session.ts';
@@ -108,6 +111,7 @@ export function hydrate(): void {
   guardedInit('live_api', installLiveApi);
   guardedInit('spa_listener', installSpaListener);
   guardedInit('network', installNetwork);
+  guardedInit('debug_polls', startPendingCountPoll);
 
   // First experiment cycle. Drain queue first so any pre-runtime calls
   // (e.g. `_testa.consent('denied')` set BEFORE the loader fired) win
@@ -156,7 +160,70 @@ function installLiveApi(): void {
     void url;
     window.dispatchEvent(new CustomEvent(LOCATIONCHANGE_EVENT));
   };
+  stub.debug = buildDebugSnapshot;
   stub._hydrated = true;
+}
+
+/**
+ * Synchronous snapshot for `_testa.debug()`. Pulls from the same in-memory
+ * sources the production code uses, so what customer support sees here is
+ * what the runtime sees.
+ *
+ * Pending count is a synchronous best-effort read; the outbox count is
+ * async, but we cache the most recent value via a side-channel update.
+ */
+function buildDebugSnapshot(): TestaDebugSnapshot {
+  const debug = window.__pixel_debug ?? { cycles: [], errors: [] };
+  const health = healthSnapshot(0);
+  return {
+    hydrated: true,
+    tracker_version: TRACKER_VERSION,
+    consent_state: consentMod.consent.getState(),
+    consent_strict: consentMod.consent.isHeld() || readProject()?.consent_mode === 'strict',
+    visitor_id: cookies.getUuid(),
+    session_id: _lastSessionId,
+    url: typeof location !== 'undefined' ? location.href : '',
+    cycles: debug.cycles ?? [],
+    errors: debug.errors ?? [],
+    redirects: readRedirectBreadcrumbs().map((b) => ({
+      ts: b.ts,
+      phase: b.phase,
+      experiment_id: b.experiment_id,
+      ...(b.from !== undefined ? { from: b.from } : {}),
+      ...(b.to !== undefined ? { to: b.to } : {}),
+    })),
+    network: {
+      queued: health.queued ?? 0,
+      sent: health.sent ?? 0,
+      dropped: health.dropped ?? 0,
+      retried: health.retried ?? 0,
+      pending: _lastPendingCount,
+    },
+  };
+}
+
+let _lastSessionId: string | null = null;
+let _lastPendingCount = 0;
+
+/**
+ * Periodic refresh of the async outbox count so `_testa.debug().network.pending`
+ * has a recent value without making `debug()` itself async.
+ */
+function startPendingCountPoll(): void {
+  if (typeof window === 'undefined') return;
+  void refreshPendingCount();
+  const intervalMs = 5_000;
+  setInterval(() => {
+    void refreshPendingCount();
+  }, intervalMs);
+}
+
+async function refreshPendingCount(): Promise<void> {
+  try {
+    _lastPendingCount = await outboxCount();
+  } catch {
+    // ignore — debug snapshot tolerates stale value
+  }
 }
 
 // ─── queue draining ────────────────────────────────────────────────────────
@@ -284,6 +351,7 @@ function buildPixelEvent(name: string, props: Record<string, unknown>, ts: numbe
   const project = readProject();
   const visitorId = cookies.getUuid() ?? generateEphemeralVisitorId();
   const sessionId = getOrCreateSessionId();
+  _lastSessionId = sessionId;
   const consentState = consentMod.consent.getState();
 
   const { lifted, rest } = liftReservedProps(props);

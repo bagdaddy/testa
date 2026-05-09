@@ -30,6 +30,40 @@ export type QueueCall =
   | ['identify', string]
   | ['navigate', string];
 
+/**
+ * Read-only snapshot returned by `_testa.debug()`. Stable shape — customers
+ * may script around it for monitoring. New fields can be added; existing
+ * fields should not be renamed without a deprecation window.
+ */
+export interface TestaDebugSnapshot {
+  hydrated: boolean;
+  tracker_version: string;
+  consent_state: ConsentState;
+  consent_strict: boolean;
+  visitor_id: string | null;
+  session_id: string | null;
+  url: string;
+  /** From `window.__pixel_debug.cycles`, last 50 entries. */
+  cycles: Array<{
+    ts: number;
+    url: string;
+    matchedExperiments: number;
+    excludedExperiments: number;
+  }>;
+  /** From `window.__pixel_debug.errors`, last 50 entries. */
+  errors: Array<{ ts: number; phase: string; message: string }>;
+  /** From `window.__pixel_debug.redirects`, last 50 entries. */
+  redirects: Array<{
+    ts: number;
+    phase: string;
+    experiment_id: number | string;
+    from?: string;
+    to?: string;
+  }>;
+  /** Outbox health counters (queued/sent/dropped/retried). */
+  network: { queued: number; sent: number; dropped: number; retried: number; pending: number };
+}
+
 export interface TestaQueue {
   /** FIFO of pre-hydration calls. Runtime drains in order. */
   q: QueueCall[];
@@ -39,6 +73,15 @@ export interface TestaQueue {
   consent(state: ConsentState): void;
   identify(visitorId: string): void;
   navigate(url: string): void;
+
+  /**
+   * Snapshot of the runtime's current state — exposed so support / customers
+   * can quickly diagnose targeting and tracking issues from the console.
+   * Pre-hydration this returns a sentinel; post-hydration the runtime
+   * replaces it with a live implementation that reads from
+   * `window.__pixel_debug` plus current cookie / consent / experiment state.
+   */
+  debug(): TestaDebugSnapshot;
 
   /** Resolves after the runtime has finished its first experiment-resolution cycle. */
   load(): Promise<void>;
@@ -97,6 +140,22 @@ export function installQueue(): TestaQueue {
     },
     navigate(url) {
       q.push(['navigate', url]);
+    },
+    debug() {
+      // Pre-hydration sentinel. Runtime swaps this with a live impl on hydrate.
+      return {
+        hydrated: false,
+        tracker_version: '',
+        consent_state: 'unknown' as ConsentState,
+        consent_strict: false,
+        visitor_id: null,
+        session_id: null,
+        url: typeof location !== 'undefined' ? location.href : '',
+        cycles: [],
+        errors: [],
+        redirects: [],
+        network: { queued: 0, sent: 0, dropped: 0, retried: 0, pending: 0 },
+      };
     },
     load() {
       return loadPromise;
