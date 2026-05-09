@@ -21,7 +21,9 @@ export function applyJs(change: JsChange): void {
   if (typeof window === 'undefined') return;
   if (!change.code) return;
   try {
-    // biome-ignore lint/security/noGlobalEval: customer-supplied JS is the contract here
+    // `new Function(code)()` is intentional — variation JS is the customer
+    // contract. We rely on Function constructor (not eval) to keep the global
+    // scope clean while still letting customers script DOM mutations.
     new Function(change.code)();
   } catch (err) {
     // Don't crash the page on a customer JS bug. Log + carry on.
