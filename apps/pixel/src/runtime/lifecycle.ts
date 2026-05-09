@@ -104,6 +104,7 @@ export function hydrate(): void {
     });
   });
   guardedInit('cmp_listener', () => consentMod.installCmpListener());
+  guardedInit('consent_replay', installConsentReplay);
   guardedInit('live_api', installLiveApi);
   guardedInit('spa_listener', installSpaListener);
   guardedInit('network', installNetwork);
@@ -203,21 +204,73 @@ function replayCall(call: unknown): void {
  * Live `track()`. Stamps the event with a UUIDv7 id, enqueues to the durable
  * outbox, and signals the transport to flush.
  *
- * Strict-consent gating: when consent.isHeld() is true, drop the event
- * (the strict mode contract is "no tracking without explicit grant").
+ * Strict-consent gating: when consent.isHeld() is true, the event is parked
+ * in a held queue (bounded at MAX_HELD_EVENTS, FIFO eviction) and replayed
+ * when consent flips to 'granted'. A flip to 'denied' discards the queue.
  *
  * The in-memory `_pendingEvents` mirror is preserved as an inspection /
  * test hook; production callers should treat the outbox as the source of
  * truth.
  */
 export function track(name: string, props?: Record<string, unknown>): void {
-  if (consentMod.consent.isHeld()) return;
   const ts = Date.now();
+  if (consentMod.consent.isHeld()) {
+    holdEvent(name, props, ts);
+    return;
+  }
+  emitTracked(name, props, ts);
+}
+
+function emitTracked(name: string, props: Record<string, unknown> | undefined, ts: number): void {
   const event = buildPixelEvent(name, props ?? {}, ts);
   const payload = JSON.stringify(event);
   _pendingEvents.push({ name, props: props ?? {}, ts });
   void outboxEnqueue({ event_id: event.event_id, payload }).then(() => {
     notifyEnqueue();
+  });
+}
+
+// ─── strict-mode held-event replay ────────────────────────────────────────
+
+interface HeldEvent {
+  name: string;
+  props: Record<string, unknown> | undefined;
+  ts: number;
+}
+
+const MAX_HELD_EVENTS = 100;
+let _heldEvents: HeldEvent[] = [];
+let _consentReplayUnsub: (() => void) | null = null;
+
+function holdEvent(name: string, props: Record<string, unknown> | undefined, ts: number): void {
+  if (_heldEvents.length >= MAX_HELD_EVENTS) {
+    // FIFO eviction; the dropped event would have been the oldest pre-consent
+    // call. Note this in __pixel_debug so support escalations can see it.
+    _heldEvents.shift();
+    pushDebugError(
+      'consent_hold_overflow',
+      `dropped oldest held event; queue capped at ${MAX_HELD_EVENTS}`,
+    );
+  }
+  _heldEvents.push({ name, props, ts });
+}
+
+/**
+ * Subscribes to consent state changes; when consent flips to 'granted' under
+ * strict mode, drains the held-events queue in original-ts order. Drops
+ * everything if state flips to 'denied' (the strict contract is "no tracking
+ * unless explicitly granted").
+ */
+function installConsentReplay(): void {
+  _consentReplayUnsub?.();
+  _consentReplayUnsub = consentMod.consent.subscribe((next) => {
+    if (next === 'granted' && _heldEvents.length > 0) {
+      const drained = _heldEvents;
+      _heldEvents = [];
+      for (const ev of drained) emitTracked(ev.name, ev.props, ev.ts);
+    } else if (next === 'denied') {
+      _heldEvents = [];
+    }
   });
 }
 
@@ -626,6 +679,9 @@ function guardedInit(phase: string, fn: () => void): void {
 /** Test reset hook. Forgets `_alreadyHydrated`, clears in-memory state. */
 export function __resetForTests(): void {
   _pendingEvents = [];
+  _heldEvents = [];
+  _consentReplayUnsub?.();
+  _consentReplayUnsub = null;
   _alreadyHydrated = false;
   _spaUninstall?.();
   _spaUninstall = null;
