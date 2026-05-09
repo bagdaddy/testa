@@ -15,50 +15,23 @@
 import type { ConsentState, PixelEvent } from '@testa-platform/shared-types';
 import type { ProjectConfig } from '@testa-platform/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetPixelState } from '../__test-utils__/reset.ts';
 import { installQueue } from '../loader/queue.ts';
-import { consent } from '../runtime/consent.ts';
-import {
-  __clearPendingEventsForTests,
-  hydrate,
-  __resetForTests as resetLifecycle,
-} from '../runtime/lifecycle.ts';
-import { __resetForTests as resetHealth } from '../runtime/network/health.ts';
-import { __resetForTests as resetOutbox } from '../runtime/network/outbox.ts';
-import { flush, __resetForTests as resetTransport } from '../runtime/network/transport.ts';
+import { hydrate } from '../runtime/lifecycle.ts';
+import { flush } from '../runtime/network/transport.ts';
 
 const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
 const realFetch = globalThis.fetch;
 
 beforeEach(async () => {
-  (window as unknown as { _testa?: unknown })._testa = undefined;
-  (window as unknown as { _testa_patched_v4?: unknown })._testa_patched_v4 = undefined;
-  (window as unknown as { cfPrefill?: unknown }).cfPrefill = undefined;
-  for (const c of document.cookie.split(';')) {
-    const eq = c.indexOf('=');
-    const name = (eq < 0 ? c : c.slice(0, eq)).trim();
-    if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
-  }
-  try {
-    localStorage.clear();
-    sessionStorage.clear();
-  } catch {
-    // ignore
-  }
-  consent.__resetForTests();
-  resetLifecycle();
-  __clearPendingEventsForTests();
-  await resetOutbox();
-  resetHealth();
-  resetTransport();
+  await resetPixelState();
   fetchMock.mockClear();
   globalThis.fetch = fetchMock as unknown as typeof fetch;
 });
 
 afterEach(async () => {
   globalThis.fetch = realFetch;
-  resetLifecycle();
-  await resetOutbox();
-  resetTransport();
+  await resetPixelState();
 });
 
 /**

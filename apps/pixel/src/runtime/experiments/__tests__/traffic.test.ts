@@ -1,22 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { clearAllCookies, clearStorages } from '../../../__test-utils__/reset.ts';
 import * as cookies from '../../cookies.ts';
 import { type Experiment, assign, bucketOf, recordExposure } from '../traffic.ts';
 
 beforeEach(() => {
-  // happy-dom shares document.cookie + storage between tests; reset.
-  for (const c of document.cookie.split(';')) {
-    const eq = c.indexOf('=');
-    const name = (eq < 0 ? c : c.slice(0, eq)).trim();
-    if (name) {
-      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
-    }
-  }
-  try {
-    localStorage.clear();
-    sessionStorage.clear();
-  } catch {
-    // ignore
-  }
+  clearAllCookies();
+  clearStorages();
 });
 
 function fiftyFifty(): Experiment {

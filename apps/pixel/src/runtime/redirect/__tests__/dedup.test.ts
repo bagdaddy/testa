@@ -1,27 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { clearAllCookies, clearStorages } from '../../../__test-utils__/reset.ts';
 import { clearRedirected, hasRedirected, markRedirected, redirectedName } from '../dedup.ts';
 
 beforeEach(() => {
   clearAllCookies();
-  try {
-    localStorage.clear();
-  } catch {
-    // ignore
-  }
+  clearStorages();
 });
 
 afterEach(() => {
   clearAllCookies();
 });
-
-function clearAllCookies(): void {
-  if (typeof document === 'undefined') return;
-  for (const c of document.cookie.split(';')) {
-    const eq = c.indexOf('=');
-    const name = (eq < 0 ? c : c.slice(0, eq)).trim();
-    if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
-  }
-}
 
 describe('dedup', () => {
   it('starts un-redirected', () => {

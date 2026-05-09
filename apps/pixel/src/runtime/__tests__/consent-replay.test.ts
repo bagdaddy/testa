@@ -16,46 +16,17 @@
 
 import type { ProjectConfig } from '@testa-platform/shared-types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resetPixelState } from '../../__test-utils__/reset.ts';
 import { installQueue } from '../../loader/queue.ts';
 import { consent } from '../consent.ts';
-import {
-  __clearPendingEventsForTests,
-  __getPendingEventsForTests,
-  hydrate,
-  __resetForTests as resetLifecycle,
-  track,
-} from '../lifecycle.ts';
-import { __resetForTests as resetHealth } from '../network/health.ts';
-import { __resetForTests as resetOutbox } from '../network/outbox.ts';
-import { __resetForTests as resetTransport } from '../network/transport.ts';
+import { __getPendingEventsForTests, hydrate, track } from '../lifecycle.ts';
 
 beforeEach(async () => {
-  (window as unknown as { _testa?: unknown })._testa = undefined;
-  (window as unknown as { _testa_patched_v4?: unknown })._testa_patched_v4 = undefined;
-  (window as unknown as { cfPrefill?: unknown }).cfPrefill = undefined;
-  (window as unknown as { __pixel_debug?: unknown }).__pixel_debug = undefined;
-  for (const c of document.cookie.split(';')) {
-    const eq = c.indexOf('=');
-    const name = (eq < 0 ? c : c.slice(0, eq)).trim();
-    if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
-  }
-  try {
-    localStorage.clear();
-    sessionStorage.clear();
-  } catch {
-    // ignore
-  }
-  consent.__resetForTests();
-  resetLifecycle();
-  await resetOutbox();
-  resetHealth();
-  resetTransport();
-  __clearPendingEventsForTests();
+  await resetPixelState();
 });
 
 afterEach(async () => {
-  await resetOutbox();
-  resetTransport();
+  await resetPixelState();
 });
 
 function strictProject(): ProjectConfig {

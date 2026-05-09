@@ -1,47 +1,22 @@
 import type { ProjectConfig } from '@testa-platform/shared-types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resetPixelState } from '../../__test-utils__/reset.ts';
 import { installQueue } from '../../loader/queue.ts';
 import { consent } from '../consent.ts';
 import * as cookies from '../cookies.ts';
 import {
   __clearPendingEventsForTests,
   __getPendingEventsForTests,
-  __resetForTests,
   hydrate,
   track,
 } from '../lifecycle.ts';
 
-beforeEach(() => {
-  // Reset window._testa, all cookies, consent, lifecycle, debug log.
-  (window as unknown as { _testa?: unknown })._testa = undefined;
-  (window as unknown as { _testa_patched_v4?: unknown })._testa_patched_v4 = undefined;
-  (window as unknown as { cfPrefill?: unknown }).cfPrefill = undefined;
-  (window as unknown as { cfGeoData?: unknown }).cfGeoData = undefined;
-  (window as unknown as { __pixel_debug?: unknown }).__pixel_debug = undefined;
-
-  for (const c of document.cookie.split(';')) {
-    const eq = c.indexOf('=');
-    const name = (eq < 0 ? c : c.slice(0, eq)).trim();
-    if (name) {
-      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
-    }
-  }
-  try {
-    localStorage.clear();
-    sessionStorage.clear();
-  } catch {
-    // ignore
-  }
-
-  consent.__resetForTests();
-  __resetForTests();
-  __clearPendingEventsForTests();
+beforeEach(async () => {
+  await resetPixelState();
 });
 
-afterEach(() => {
-  consent.__resetForTests();
-  __resetForTests();
-  __clearPendingEventsForTests();
+afterEach(async () => {
+  await resetPixelState();
 });
 
 function fixture(): ProjectConfig {

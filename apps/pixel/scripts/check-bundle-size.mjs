@@ -11,10 +11,10 @@
  *   - runtime: 40 KB gzip — competitive with VWO (~45 KB) / ABTasty (~38 KB)
  */
 
-import { gzipSync } from 'node:zlib';
 import { readFileSync, statSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = resolve(__dirname, '..', 'dist');
@@ -29,7 +29,7 @@ function check(target) {
   let raw;
   try {
     raw = readFileSync(path);
-  } catch (err) {
+  } catch {
     console.error(`[size-cap] missing bundle ${path} — run \`pnpm build\` first`);
     return { ok: false };
   }

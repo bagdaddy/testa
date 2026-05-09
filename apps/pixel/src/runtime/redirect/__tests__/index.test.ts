@@ -1,5 +1,6 @@
 import type { VariationChange } from '@testa-platform/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearAllCookies, clearStorages } from '../../../__test-utils__/reset.ts';
 import { readBreadcrumbs, __resetForTests as resetBreadcrumbs } from '../breadcrumbs.ts';
 import { clearRedirected, markRedirected } from '../dedup.ts';
 import { evaluateAndApply } from '../index.ts';
@@ -11,18 +12,8 @@ const REDIRECT: Extract<VariationChange, { type: 'redirect' }> = {
 };
 
 beforeEach(() => {
-  if (typeof document !== 'undefined') {
-    for (const c of document.cookie.split(';')) {
-      const eq = c.indexOf('=');
-      const name = (eq < 0 ? c : c.slice(0, eq)).trim();
-      if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
-    }
-  }
-  try {
-    localStorage.clear();
-  } catch {
-    // ignore
-  }
+  clearAllCookies();
+  clearStorages();
   resetBreadcrumbs();
 });
 
