@@ -39,6 +39,7 @@ import { fireEvent, installLegacy, publishLoaded } from './legacy/index.ts';
 import { initOutbox, enqueue as outboxEnqueue } from './network/outbox.ts';
 import { installTransport, notifyEnqueue } from './network/transport.ts';
 import { uuidv7 } from './network/uuid7.ts';
+import { evaluateAndApply as evaluateRedirect } from './redirect/index.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
 import { getOrCreateSessionId } from './session.ts';
 import { installSpaHandler } from './spa.ts';
@@ -414,11 +415,32 @@ export function runExperimentCycle(): void {
       variation_id: result.variationId,
     });
 
-    // Apply the chosen variation's DOM changes (Phase 3.9). The redirect
-    // change type is no-op here — Phase 3.10 owns redirects.
     const variation = expConfig.variations.find((v) => v.variation_id === result.variationId);
-    if (variation && variation.changes.length > 0) {
-      const teardowns = applyVariation(result.variationId, variation.changes);
+    if (!variation || variation.changes.length === 0) continue;
+
+    // Redirects run BEFORE other variation changes — if we're navigating
+    // away, applying DOM mutations on a page that's about to unload is wasted
+    // work and risks visible flicker. The currentUrl is snapshotted ONCE
+    // here so the redirect engine never reads `location` directly during
+    // its merge (Next.js race-condition fix).
+    const redirectChange = variation.changes.find((c) => c.type === 'redirect');
+    if (redirectChange?.type === 'redirect') {
+      const outcome = evaluateRedirect({
+        experiment_id: expConfig.experiment_id,
+        variation_id: result.variationId,
+        change: redirectChange,
+        currentUrl: typeof location !== 'undefined' ? location.href : '',
+      });
+      if (outcome.fired) {
+        // Page is going away — abort the rest of the cycle.
+        return;
+      }
+    }
+
+    // Non-redirect changes (css/html/text/attribute/js).
+    const nonRedirect = variation.changes.filter((c) => c.type !== 'redirect');
+    if (nonRedirect.length > 0) {
+      const teardowns = applyVariation(result.variationId, nonRedirect);
       _activeTeardowns.push(...teardowns);
     }
 
