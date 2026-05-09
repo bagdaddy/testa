@@ -143,6 +143,31 @@ function onTransportFailure(eventCount: number): void {
 }
 
 /**
+ * Synchronously ship a SINGLE event via `navigator.sendBeacon`. Used right
+ * before a programmatic redirect to close the SRM gap: if we waited for the
+ * normal IDB-backed flush, the page would unload before the `experiment_view`
+ * event reached the wire, under-counting redirect-variant exposures.
+ *
+ * Returns true if the beacon was accepted by the browser. Caller still adds
+ * the event to the outbox as a backup — if the beacon was rejected (rare,
+ * usually quota-related), the next pageload will pick it up from IDB.
+ *
+ * Safe to call without `installTransport()` having run (no-op returns false).
+ */
+export function shipEventSync(payload: string): boolean {
+  if (!_config) return false;
+  if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') {
+    return false;
+  }
+  const body = `[${payload}]`;
+  try {
+    return navigator.sendBeacon(_config.endpoint, new Blob([body], { type: 'application/json' }));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Synchronous-style flush for `pagehide` / `visibilitychange:hidden`.
  *
  * Uses `navigator.sendBeacon` because `fetch keepalive` is unreliable on

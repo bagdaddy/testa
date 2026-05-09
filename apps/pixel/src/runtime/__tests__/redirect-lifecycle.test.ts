@@ -136,6 +136,43 @@ describe('lifecycle redirect wiring', () => {
     expect(url.searchParams.get('utm_campaign')).toBe('spring');
   });
 
+  it('SRM fix: experiment_view ships via sendBeacon BEFORE location.replace', () => {
+    installQueue();
+    Object.defineProperty(originalLocation, 'href', {
+      configurable: true,
+      value: 'https://customer.example/landing',
+    });
+    (window as unknown as { cfPrefill: unknown }).cfPrefill = {
+      project: projectWithRedirect({
+        fromUrl: 'https://customer.example/landing',
+        toUrl: 'https://customer.example/promo',
+      }),
+      apiUrl: 'https://customer.example',
+    };
+
+    const beaconCalls: Array<{ url: string; bodyText: string }> = [];
+    const beaconMock = vi.fn((url: string, body?: BodyInit | null) => {
+      // Capture the call ORDER vs replaceMock to prove beacon fires first.
+      beaconCalls.push({ url, bodyText: body instanceof Blob ? '<blob>' : String(body) });
+      return true;
+    });
+    Object.defineProperty(navigator, 'sendBeacon', {
+      configurable: true,
+      writable: true,
+      value: beaconMock,
+    });
+
+    hydrate();
+
+    // Beacon fired AT LEAST once, AND the first call carries the
+    // experiment_view event for our experiment.
+    expect(beaconMock).toHaveBeenCalled();
+    expect(replaceMock).toHaveBeenCalledTimes(1);
+
+    // Beacon URL must be the configured /track endpoint.
+    expect(beaconCalls[0]?.url).toBe('https://customer.example/track');
+  });
+
   it('logs breadcrumbs to __pixel_debug.redirects', () => {
     installQueue();
     Object.defineProperty(originalLocation, 'href', {

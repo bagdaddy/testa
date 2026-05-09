@@ -1,0 +1,65 @@
+{
+  "project_id": 9999,
+  "slug": "demo",
+  "integration_version": "4.0",
+  "consent_mode": "aware",
+  "experiments": [
+    {
+      "experiment_id": 100,
+      "status": "active",
+      "rules": [],
+      "traffic_allocation": 100,
+      "variations": [
+        {
+          "variation_id": 200,
+          "weight": 33,
+          "changes": []
+        },
+        {
+          "variation_id": 201,
+          "weight": 33,
+          "changes": [
+            {
+              "type": "css",
+              "selector": "h1",
+              "styles": {
+                "color": "#ff3366",
+                "font-size": "4rem",
+                "text-shadow": "0 2px 8px rgba(255, 51, 102, 0.3)"
+              }
+            },
+            {
+              "type": "css",
+              "selector": ".cta",
+              "styles": {
+                "background": "#ff3366",
+                "color": "white",
+                "transform": "scale(1.1)",
+                "font-weight": "700"
+              }
+            },
+            {
+              "type": "text",
+              "selector": ".cta",
+              "text": "Buy Now — 30% Off"
+            }
+          ]
+        },
+        {
+          "variation_id": 202,
+          "weight": 34,
+          "changes": [
+            {
+              "type": "redirect",
+              "from_url": "http://localhost:7777/",
+              "to_url": "http://localhost:7777/promo.html"
+            }
+          ]
+        }
+      ],
+      "goals": []
+    }
+  ],
+  "published_at": "2026-05-09T00:00:00.000Z",
+  "config_hash": "demo-1"
+}

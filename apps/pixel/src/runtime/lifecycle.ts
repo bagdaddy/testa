@@ -39,7 +39,7 @@ import {
 import { fireEvent, installLegacy, publishLoaded } from './legacy/index.ts';
 import { snapshot as healthSnapshot } from './network/health.ts';
 import { initOutbox, count as outboxCount, enqueue as outboxEnqueue } from './network/outbox.ts';
-import { installTransport, notifyEnqueue } from './network/transport.ts';
+import { installTransport, notifyEnqueue, shipEventSync } from './network/transport.ts';
 import { uuidv7 } from './network/uuid7.ts';
 import { readBreadcrumbs as readRedirectBreadcrumbs } from './redirect/breadcrumbs.ts';
 import { evaluateAndApply as evaluateRedirect } from './redirect/index.ts';
@@ -288,6 +288,29 @@ export function track(name: string, props?: Record<string, unknown>): void {
   emitTracked(name, props, ts);
 }
 
+/**
+ * Pre-redirect path: build the event sync, ship it via sendBeacon
+ * synchronously, AND enqueue to the outbox as a backup. This closes the SRM
+ * gap that would otherwise under-count redirect-variant exposures.
+ *
+ * - sendBeacon is the only API guaranteed to deliver during navigation.
+ * - The outbox backup covers the case where beacon returns false (rare,
+ *   usually quota): the event survives in IDB and the next pageload's
+ *   transport flushes it. We do NOT mark sent on the outbox — if the beacon
+ *   succeeds AND the next page also flushes, the collector dedups by
+ *   event_id. UUIDv7 keeps the same id across both paths.
+ */
+function trackSyncForRedirect(name: string, props: Record<string, unknown>): void {
+  const ts = Date.now();
+  const event = buildPixelEvent(name, props, ts);
+  const payload = JSON.stringify(event);
+  _pendingEvents.push({ name, props, ts });
+  // Synchronous beacon — must run BEFORE location.replace().
+  shipEventSync(payload);
+  // Outbox backup — survives if beacon was rejected.
+  void outboxEnqueue({ event_id: event.event_id, payload });
+}
+
 function emitTracked(name: string, props: Record<string, unknown> | undefined, ts: number): void {
   const event = buildPixelEvent(name, props ?? {}, ts);
   const payload = JSON.stringify(event);
@@ -528,15 +551,35 @@ export function runExperimentCycle(): void {
 
     stats.matched += 1;
 
-    // Bump session cookie + record exposure + emit experiment_view.
+    // Bump session cookie + record exposure.
     cookies.bumpSession(expConfig.experiment_id);
     recordExposure(exp);
-    track('experiment_view', {
-      experiment_id: expConfig.experiment_id,
-      variation_id: result.variationId,
-    });
 
     const variation = expConfig.variations.find((v) => v.variation_id === result.variationId);
+    const redirectChange = variation?.changes.find((c) => c.type === 'redirect');
+
+    // SRM fix: when this variation will redirect, ship the experiment_view
+    // SYNCHRONOUSLY via sendBeacon BEFORE we lose the page. The normal
+    // outbox path is async (IDB write + 500ms flush debounce), so without
+    // this the event would race the navigation and frequently lose,
+    // under-counting the redirect variant vs control.
+    const willRedirect =
+      redirectChange?.type === 'redirect' &&
+      !consentMod.consent.isHeld() &&
+      typeof location !== 'undefined';
+
+    if (willRedirect) {
+      trackSyncForRedirect('experiment_view', {
+        experiment_id: expConfig.experiment_id,
+        variation_id: result.variationId,
+      });
+    } else {
+      track('experiment_view', {
+        experiment_id: expConfig.experiment_id,
+        variation_id: result.variationId,
+      });
+    }
+
     if (!variation || variation.changes.length === 0) continue;
 
     // Redirects run BEFORE other variation changes — if we're navigating
@@ -544,7 +587,6 @@ export function runExperimentCycle(): void {
     // work and risks visible flicker. The currentUrl is snapshotted ONCE
     // here so the redirect engine never reads `location` directly during
     // its merge (Next.js race-condition fix).
-    const redirectChange = variation.changes.find((c) => c.type === 'redirect');
     if (redirectChange?.type === 'redirect') {
       const outcome = evaluateRedirect({
         experiment_id: expConfig.experiment_id,
