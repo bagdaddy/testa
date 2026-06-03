@@ -6,7 +6,8 @@ services:
     image: redis:7.4-alpine
     container_name: tp-redis
     ports:
-      - "6379:6379"
+      # Host 6380 → container 6379 to avoid clashing with other local Redis instances.
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
