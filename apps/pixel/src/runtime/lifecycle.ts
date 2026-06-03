@@ -46,6 +46,7 @@ import { evaluateAndApply as evaluateRedirect } from './redirect/index.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
 import { getOrCreateSessionId } from './session.ts';
 import { installSpaHandler } from './spa.ts';
+import { detectBrowser, detectOs } from './ua.ts';
 
 const LOCATIONCHANGE_EVENT = '_testa:locationchange';
 
@@ -671,8 +672,8 @@ function buildEvalContext(): EvalContext & { visitor: BuildVisitorContext } {
     },
     device: {
       type: detectDeviceType(),
-      browser: '',
-      os: '',
+      browser: detectBrowser(navigator.userAgent || ''),
+      os: detectOs(navigator.userAgent || ''),
       viewportWidth: window.innerWidth || 0,
       language: navigator.language || '',
     },
