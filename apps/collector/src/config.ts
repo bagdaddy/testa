@@ -9,10 +9,14 @@ const envSchema = z.object({
   CLICKHOUSE_PASSWORD: z.string().default(''),
   CLICKHOUSE_DATABASE: z.string().default('default'),
 
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  // Default host port 6380 matches docker-compose.yml mapping (avoids clashes
+  // with other local Redis instances). Override via REDIS_URL when needed.
+  REDIS_URL: z.string().default('redis://localhost:6380'),
   REDIS_STREAM_KEY: z.string().default('events'),
   REDIS_CONSUMER_GROUP: z.string().default('collector-writers'),
   REDIS_CONSUMER_NAME: z.string().default(`collector-${process.pid}`),
+  /** Approximate cap on stream length (XADD MAXLEN ~ N). 0 disables. */
+  REDIS_STREAM_MAXLEN: z.coerce.number().int().nonnegative().default(1_000_000),
 
   INGEST_SHARED_SECRET: z.string().min(16).default('dev-secret-change-me-please-1234'),
   /** Window (seconds) for HMAC replay protection. */
@@ -24,6 +28,11 @@ const envSchema = z.object({
 
   CONSUMER_BATCH_SIZE: z.coerce.number().int().positive().default(1000),
   CONSUMER_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+
+  /** Comma-separated event names that should be deduplicated. */
+  DEDUP_EVENT_NAMES: z.string().default('purchase'),
+  /** Dedup TTL for the Redis SET NX EX gate. */
+  DEDUP_TTL_SEC: z.coerce.number().int().positive().default(600),
 });
 
 const parsed = envSchema.parse(process.env);
@@ -43,6 +52,7 @@ export const config = {
   redis: {
     url: parsed.REDIS_URL,
     streamKey: parsed.REDIS_STREAM_KEY,
+    streamMaxLen: parsed.REDIS_STREAM_MAXLEN,
     consumerGroup: parsed.REDIS_CONSUMER_GROUP,
     consumerName: parsed.REDIS_CONSUMER_NAME,
   },
@@ -59,5 +69,12 @@ export const config = {
   consumer: {
     batchSize: parsed.CONSUMER_BATCH_SIZE,
     flushIntervalMs: parsed.CONSUMER_FLUSH_INTERVAL_MS,
+  },
+
+  dedup: {
+    eventNames: parsed.DEDUP_EVENT_NAMES.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    ttlSec: parsed.DEDUP_TTL_SEC,
   },
 } as const;
