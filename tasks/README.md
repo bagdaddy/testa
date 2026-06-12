@@ -10,6 +10,8 @@ Each task = one focused PR. Agents pick the lowest-numbered `pending` task whose
 
 **Status legend:** `pending` (open, ready to claim) · `in_progress` (claimed, work happening) · `blocked` (depends on a pending task) · `done` (PR merged) · `cancelled` (no longer needed).
 
+> **2026-06-12 — board reconciled against git history.** The status table had drifted behind the code. Closed out as `done`: **1.2** (migrate runner), **1.4** + **1.5** (subsumed by PRD-001 ingest pipeline, `81f5ede`), **3.6** (`e26930c`), **3.10** (`5012248`/`38115de`), **3.14** (`fc444dd`). Genuinely still open: **1.6**, **1.7**, **2.8**, **2.9** (human-gated), **3.11**, **3.13**, **3.15**; **3.7** stays `in_progress` (audience engine shipped, but `visitor.custom` sandbox + legacy `targeting[]` evaluator deferred). Test baseline at reconciliation: pixel 317 + edge 90 + collector 41 = 448 green.
+
 ---
 
 ## Phase 0 — Bootstrap (DONE inline; no task files)
@@ -21,10 +23,10 @@ Foundation work was done in the seed commits before this task system existed. Se
 | ID | Task | Status | Blocked by |
 |---|---|---|---|
 | [1.1](./phase-1/1.1-clickhouse-schema-files.md) | ClickHouse schema files | done | — |
-| [1.2](./phase-1/1.2-migration-runner.md) | CH migration runner CLI | pending | 1.1 |
+| [1.2](./phase-1/1.2-migration-runner.md) | CH migration runner CLI | done | 1.1 |
 | [1.3](./phase-1/1.3-clickhouse-singleton.md) | `@clickhouse/client` singleton | done | — |
-| [1.4](./phase-1/1.4-ingest-route.md) | `POST /_ingest` route + HMAC + Zod | pending | 1.3 |
-| [1.5](./phase-1/1.5-consumer-worker.md) | Consumer worker (XREADGROUP → CH INSERT) | pending | 1.1, 1.2, 1.3 |
+| [1.4](./phase-1/1.4-ingest-route.md) | `POST /_ingest` route + HMAC + Zod | done | 1.3 |
+| [1.5](./phase-1/1.5-consumer-worker.md) | Consumer worker (XREADGROUP → CH INSERT) | done | 1.1, 1.2, 1.3 |
 | [1.6](./phase-1/1.6-fx-rates.md) | FX rates sync + dictionary endpoint | pending | 1.3 |
 | [1.7](./phase-1/1.7-tests.md) | Vitest coverage for ingest, consumer, replay | pending | 1.4, 1.5 |
 
@@ -51,22 +53,22 @@ Foundation work was done in the seed commits before this task system existed. Se
 | [3.3](./phase-3/3.3-cookies-module.md) | Cookie module (7 cookies inc. freq + mutex) | done | — |
 | [3.4](./phase-3/3.4-consent-state-machine.md) | Consent state machine + CMP integration | done | — |
 | [3.5](./phase-3/3.5-spa-navigation.md) | SPA navigation (patch consumer + canonical URL diff) | done | 3.1 |
-| [3.6](./phase-3/3.6-idb-outbox-transport.md) | IDB outbox + transport + retry + `_pixel_health` | pending | 3.4 |
+| [3.6](./phase-3/3.6-idb-outbox-transport.md) | IDB outbox + transport + retry + `_pixel_health` | done | 3.4 |
 | [3.7](./phase-3/3.7-audience-rule-engine.md) | Audience rule engine + sandboxed JS evaluator + legacy compat | in_progress | — |
 | [3.8](./phase-3/3.8-traffic-assignment.md) | Variation traffic assignment (xxhash32 + freq + mutex) | done | 3.3 |
 | [3.9](./phase-3/3.9-variation-apply.md) | Variation apply (CSS / HTML / text / attr / JS) | done | 3.8 |
-| [3.10](./phase-3/3.10-redirect-engine.md) | Redirect engine (decide + execute + loop guard + cross-domain + SPA) | pending | 3.7, 3.8 |
+| [3.10](./phase-3/3.10-redirect-engine.md) | Redirect engine (decide + execute + loop guard + cross-domain + SPA) | done | 3.7, 3.8 |
 | [3.11](./phase-3/3.11-spa-redirect-harness.md) | SPA redirect repro harness (Next 12/13/14, RR6, plain JS) | pending | 3.10 |
 | [3.12](./phase-3/3.12-legacy-globals-compat.md) | `window.Analytica.*` legacy globals + eventEmitter | done | 3.2, 3.3, 3.8 |
 | [3.13](./phase-3/3.13-legacy-http-calls.md) | Legacy HTTP calls (`/api/leads`, `/api/leads/convert`, `/api/pixel`) | pending | 3.12 |
-| [3.14](./phase-3/3.14-bundle-build.md) | esbuild loader + runtime, content-hashed runtime URL | pending | 3.1, 3.2 |
+| [3.14](./phase-3/3.14-bundle-build.md) | esbuild loader + runtime, content-hashed runtime URL | done | 3.1, 3.2 |
 | [3.15](./phase-3/3.15-test-coverage.md) | Vitest coverage + Playwright golden flows | pending | 3.1–3.13 |
 
 The Phase 3 corpus reflects the 2026-05-06 grilling decisions: anti-flicker is the customer's SmartCode's job (no shielding in 3.x); redirect engine is state-of-the-art and pulled forward (no 1:1 port of 3.6 redirect bugs); audience targeting uses the new `AudienceCondition` schema (`docs/reference/audience-schema.md`); event delivery uses an IndexedDB outbox + UUIDv7 + deterministic Redis stream IDs for dedup; `window.Analytica.*` is a frozen API surface (`docs/reference/legacy-globals-inventory.md`).
 
 ## Phase 4 — Collector read API
 
-To be scoped (after Phase 1.5 + Phase 3 partial).
+To be scoped. The write path (Phase 1.4 + 1.5, PRD-001) is done, so the read API is unblocked — scope it once the Phase 1–3 stragglers (1.6, 1.7, 2.8, 3.11, 3.13, 3.15) are closed.
 
 ## Phase 5 — Crobot integration
 
