@@ -18,14 +18,19 @@ function client(): ClickHouseClient {
   return _client;
 }
 
-/** Insert rows into the events_buffer table (JSONEachRow). */
-export async function insertEvents(rows: readonly object[]): Promise<void> {
+/** Insert rows into an arbitrary table (JSONEachRow). No-op on empty input. */
+export async function insertRows(table: string, rows: readonly object[]): Promise<void> {
   if (rows.length === 0) return;
   await client().insert({
-    table: 'events_buffer',
+    table,
     values: rows,
     format: 'JSONEachRow',
   });
+}
+
+/** Insert rows into the events_buffer table (JSONEachRow). */
+export async function insertEvents(rows: readonly object[]): Promise<void> {
+  await insertRows('events_buffer', rows);
 }
 
 /** Run a read query and return parsed rows. */
