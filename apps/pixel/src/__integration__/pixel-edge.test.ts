@@ -43,6 +43,17 @@ async function drainEnqueues(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 5));
 }
 
+/**
+ * After `hydrate()`, the runtime fires the baseline lifecycle events
+ * (`session_start` + `page_view`). Flush those out and clear the fetch mock so
+ * each test asserts only on the events it explicitly emits.
+ */
+async function settleHydration(): Promise<void> {
+  await drainEnqueues();
+  await flush();
+  fetchMock.mockClear();
+}
+
 function project(): ProjectConfig {
   return {
     project_id: 42,
@@ -86,6 +97,7 @@ describe('pixel emits wire-format PixelEvents', () => {
       apiUrl: 'https://customer.example',
     };
     hydrate();
+    await settleHydration();
 
     window._testa?.track?.('add_to_cart', { sku: 'X-1' });
     await drainEnqueues();
@@ -117,6 +129,7 @@ describe('pixel emits wire-format PixelEvents', () => {
       apiUrl: 'https://customer.example',
     };
     hydrate();
+    await settleHydration();
 
     window._testa?.trackPurchase?.(99.95, 'EUR', 'order-7', 3);
     await drainEnqueues();
@@ -144,12 +157,13 @@ describe('pixel emits wire-format PixelEvents', () => {
       apiUrl: 'https://customer.example',
     };
     hydrate();
+    // Baseline lifecycle events fire while state is still 'granted'; flush them.
+    await settleHydration();
     // Strict mode alone doesn't hold (default state is 'granted'). Flip to
     // 'unknown' so isHeld() returns true.
     window._testa?.consent?.('unknown');
-    fetchMock.mockClear();
 
-    window._testa?.track?.('page_view');
+    window._testa?.track?.('checkout_start');
     await drainEnqueues();
     await flush();
 
@@ -163,6 +177,7 @@ describe('pixel emits wire-format PixelEvents', () => {
       apiUrl: 'https://customer.example',
     };
     hydrate();
+    await settleHydration();
 
     window._testa?.track?.('a');
     window._testa?.track?.('b');

@@ -192,3 +192,110 @@ describe('evaluateAndApply — Next.js-style race', () => {
     expect(new URL(finalUrl).searchParams.has('stale')).toBe(false);
   });
 });
+
+describe('evaluateAndApply — url_match_type modes', () => {
+  it('contains: string-replaces from_url and fires', () => {
+    const navigate = vi.fn();
+    const out = evaluateAndApply(
+      {
+        experiment_id: 21,
+        variation_id: 1,
+        change: {
+          type: 'redirect',
+          from_url: '/old',
+          to_url: '/new',
+          url_match_type: 'contains',
+        },
+        currentUrl: 'https://customer.com/old/page',
+      },
+      navigate,
+    );
+    expect(out.fired).toBe(true);
+    expect(navigate).toHaveBeenCalledWith('https://customer.com/new/page');
+  });
+
+  it('contains: no_match when from_url is not a substring of current', () => {
+    const navigate = vi.fn();
+    const out = evaluateAndApply(
+      {
+        experiment_id: 22,
+        variation_id: 1,
+        change: {
+          type: 'redirect',
+          from_url: '/nope',
+          to_url: '/new',
+          url_match_type: 'contains',
+        },
+        currentUrl: 'https://customer.com/old/page',
+      },
+      navigate,
+    );
+    expect(out.fired).toBe(false);
+    expect(out.reason).toBe('no_match');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('query: sets/overwrites query params on the current URL and fires', () => {
+    const navigate = vi.fn();
+    const out = evaluateAndApply(
+      {
+        experiment_id: 23,
+        variation_id: 1,
+        change: {
+          type: 'redirect',
+          from_url: 'https://customer.com/p',
+          to_url: 'variant=b',
+          url_match_type: 'query',
+        },
+        currentUrl: 'https://customer.com/p?keep=1',
+      },
+      navigate,
+    );
+    expect(out.fired).toBe(true);
+    const finalUrl = navigate.mock.calls[0]?.[0] as string;
+    const url = new URL(finalUrl);
+    expect(url.searchParams.get('variant')).toBe('b');
+    expect(url.searchParams.get('keep')).toBe('1');
+  });
+
+  it('regex: expands $1/$2 backrefs (missing group → empty) and fires', () => {
+    const navigate = vi.fn();
+    const out = evaluateAndApply(
+      {
+        experiment_id: 24,
+        variation_id: 1,
+        change: {
+          type: 'redirect',
+          from_url: 'https://customer\\.com/products/(\\d+)(/extra)?',
+          to_url: 'https://customer.com/p?id=$1&x=$2',
+          url_match_type: 'regex',
+        },
+        currentUrl: 'https://customer.com/products/42',
+      },
+      navigate,
+    );
+    expect(out.fired).toBe(true);
+    expect(navigate).toHaveBeenCalledWith('https://customer.com/p?id=42&x=');
+  });
+
+  it('self-redirect no-op: destination equal to current is skipped', () => {
+    const navigate = vi.fn();
+    const out = evaluateAndApply(
+      {
+        experiment_id: 25,
+        variation_id: 1,
+        change: {
+          type: 'redirect',
+          from_url: '/page',
+          to_url: '/page',
+          url_match_type: 'contains',
+        },
+        currentUrl: 'https://customer.com/page',
+      },
+      navigate,
+    );
+    expect(out.fired).toBe(false);
+    expect(out.reason).toBe('skipped_same_url');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});

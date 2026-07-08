@@ -14,8 +14,11 @@
 import type { VariationChange } from '@testa-platform/shared-types';
 import { type AttributeChange, applyAttribute } from './attribute.ts';
 import { type CssChange, applyCss } from './css.ts';
+import { type HideChange, applyHide } from './hide.ts';
 import { type HtmlChange, applyHtml } from './html.ts';
+import { type AppendChange, type PrependChange, applyAppend, applyPrepend } from './insert.ts';
 import { type JsChange, applyJs } from './js.ts';
+import { type MoveChange, applyMove } from './move.ts';
 import { type TextChange, applyText } from './text.ts';
 
 export type Teardown = () => void;
@@ -61,10 +64,34 @@ function applyOne(variationId: number | string, change: VariationChange): Teardo
       applyJs(change as JsChange);
       return null;
 
+    case 'hide':
+      // Watches the DOM (late-render parity with 3.3.3's retry loop); returns
+      // a teardown the caller disposes on the next cycle.
+      return applyHide(change as HideChange);
+
+    case 'append':
+      return applyAppend(change as AppendChange);
+
+    case 'prepend':
+      return applyPrepend(change as PrependChange);
+
+    case 'move':
+      return applyMove(change as MoveChange);
+
     case 'redirect':
       // Phase 3.10 owns redirect application. Variation apply ignores it.
       return null;
   }
 }
 
-export { applyAttribute, applyCss, applyHtml, applyJs, applyText };
+export {
+  applyAppend,
+  applyAttribute,
+  applyCss,
+  applyHide,
+  applyHtml,
+  applyJs,
+  applyMove,
+  applyPrepend,
+  applyText,
+};

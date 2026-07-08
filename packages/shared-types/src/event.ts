@@ -8,6 +8,10 @@ export type ReservedEventName =
   | 'page_view'
   | 'session_start'
   | 'experiment_view'
+  /** A configured goal fired (3.3.3 parity: click/page_view/custom goal match). Carries `goal_id`. */
+  | 'conversion'
+  /** Lead/participation signal (3.3.3 `createLead`). Carries `experiment_id`+`variation_id`. */
+  | 'lead_generated'
   | 'purchase'
   | 'add_to_cart'
   | 'checkout_start'
@@ -32,6 +36,8 @@ export interface PixelEvent {
   project_id: number;
   experiment_id?: number;
   variation_id?: number;
+  /** Present on `conversion` events — which configured goal matched. */
+  goal_id?: number;
   visitor_id: string;
   session_id: string;
   url: string;
