@@ -90,7 +90,16 @@ export type VariationChange =
 
 export interface GoalConfig {
   goal_id: number;
+  /** Human-readable name (3.3.3 `goal.name`); surfaced in the GTM conversion push. */
+  name?: string;
   type: GoalType;
+  /** For `page_view` goals: how `action` (a URL pattern) is matched against the current URL. */
   match_type?: MatchType;
+  /**
+   * Goal target, semantics per `type`:
+   * - `click`   → CSS selector to attach a click listener to.
+   * - `page_view` → URL pattern matched via `match_type`.
+   * - `custom`  → the custom event name that triggers this goal.
+   */
   action: string;
 }

@@ -30,8 +30,9 @@
 
 import type { VariationChange } from '@testa-platform/shared-types';
 import { type RedirectBreadcrumb, logRedirect } from './breadcrumbs.ts';
+import { buildRedirectUrl, resolveMode } from './build-url.ts';
 import { hasRedirected, markRedirected } from './dedup.ts';
-import { canonicalize, matchesUrl } from './match.ts';
+import { canonicalize, matchesForMode, matchesUrl } from './match.ts';
 import { mergeParams } from './merge-params.ts';
 
 export interface RedirectInputs {
@@ -91,12 +92,23 @@ export function evaluateAndApply(
     return { fired: false, reason: 'aborted_invalid_target' };
   }
 
-  if (!matchesUrl(currentUrl, change.from_url)) {
+  if (!matchesForMode(currentUrl, change.from_url, resolveMode(change))) {
     logRedirect({ ts: Date.now(), phase: 'no_match', ...base });
     return { fired: false, reason: 'no_match' };
   }
 
-  const finalUrl = mergeParams(currentUrl, change.to_url);
+  let finalUrl: string;
+  try {
+    finalUrl = buildRedirectUrl(currentUrl, change);
+  } catch (err) {
+    logRedirect({
+      ts: Date.now(),
+      phase: 'aborted_invalid_target',
+      ...base,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return { fired: false, reason: 'aborted_invalid_target' };
+  }
 
   // Same canonical URL → no-op. Prevents history.pushState on the same URL
   // from triggering a redirect that would just re-match.
@@ -132,5 +144,14 @@ function defaultNavigate(url: string): void {
   window.location.replace(url);
 }
 
-export { canonicalize, matchesUrl, mergeParams, hasRedirected, markRedirected };
+export {
+  canonicalize,
+  matchesUrl,
+  matchesForMode,
+  mergeParams,
+  hasRedirected,
+  markRedirected,
+  buildRedirectUrl,
+  resolveMode,
+};
 export type { RedirectBreadcrumb };

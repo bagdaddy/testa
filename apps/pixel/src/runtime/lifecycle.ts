@@ -31,21 +31,29 @@ import * as consentMod from './consent.ts';
 import * as cookies from './cookies.ts';
 import { type Teardown, applyVariation } from './experiments/apply/index.ts';
 import {
+  type AssignedExperiment,
+  type GoalController,
+  createGoalController,
+} from './experiments/goals.ts';
+import {
   type AssignResult,
   type Experiment,
   assign,
   recordExposure,
 } from './experiments/traffic.ts';
+import { pushLeadToDataLayer } from './legacy/data-layer.ts';
 import { fireEvent, installLegacy, publishLoaded } from './legacy/index.ts';
 import { snapshot as healthSnapshot } from './network/health.ts';
 import { initOutbox, count as outboxCount, enqueue as outboxEnqueue } from './network/outbox.ts';
 import { installTransport, notifyEnqueue, shipEventSync } from './network/transport.ts';
 import { uuidv7 } from './network/uuid7.ts';
+import { maybeEnterPreviewMode } from './preview.ts';
 import { readBreadcrumbs as readRedirectBreadcrumbs } from './redirect/breadcrumbs.ts';
 import { evaluateAndApply as evaluateRedirect } from './redirect/index.ts';
 import { type EvalContext, evaluate } from './rules/audience.ts';
-import { getOrCreateSessionId } from './session.ts';
+import { SESSION_ID_COOKIE, getOrCreateSessionId } from './session.ts';
 import { installSpaHandler } from './spa.ts';
+import { readValue } from './storage.ts';
 import { detectBrowser, detectOs } from './ua.ts';
 
 const LOCATIONCHANGE_EVENT = '_testa:locationchange';
@@ -85,6 +93,10 @@ let _pendingEvents: PendingEvent[] = [];
 let _alreadyHydrated = false;
 /** DOM-watching teardowns from the previous cycle's appliers; disposed at the start of each cycle. */
 let _activeTeardowns: Teardown[] = [];
+/** Goal controller for the current cycle (click listeners + custom-goal registry). */
+let _goals: GoalController | null = null;
+/** True once preview mode took over — the normal experiment cycle is skipped. */
+let _previewActive = false;
 
 /**
  * Top-level entry. Idempotent. Errors anywhere in the pipeline are
@@ -102,8 +114,9 @@ export function hydrate(): void {
     installLegacy({
       pushEvent: (name, data) => {
         // Customer-fired custom events route through the same `track` pipe
-        // as `_testa.track()`, so dashboards see them.
-        track(name, (data as Record<string, unknown> | undefined) ?? {});
+        // as `_testa.track()`, so dashboards see them — AND are matched against
+        // any `custom` goals so they can record conversions.
+        trackCustomerEvent(name, (data as Record<string, unknown> | undefined) ?? {});
       },
     });
   });
@@ -118,9 +131,24 @@ export function hydrate(): void {
   // (e.g. `_testa.consent('denied')` set BEFORE the loader fired) win
   // before the cycle reads consent state.
   guardedInit('drain_queue', drainQueue);
-  guardedInit('first_cycle', () => {
-    runExperimentCycle();
+
+  // Preview mode short-circuits the normal experiment cycle: fetch + apply the
+  // draft changes for the preview session and skip assignment entirely (3.3.3
+  // `?testa_preview=true` guard).
+  guardedInit('preview_mode', () => {
+    _previewActive = maybeEnterPreviewMode({
+      apiUrl: window.cfPrefill?.apiUrl,
+      apply: (variationId, changes) => {
+        _activeTeardowns.push(...applyVariation(variationId, changes));
+      },
+    });
   });
+
+  if (!_previewActive) {
+    guardedInit('first_cycle', () => {
+      runExperimentCycle();
+    });
+  }
 
   // Fire load() once. SPA re-evaluations don't re-fire it.
   guardedInit('fire_ready', fireReady);
@@ -136,10 +164,10 @@ function installLiveApi(): void {
   // and `q` properties stay so customers' SmartCode listening for them
   // doesn't break.
   stub.track = (name, props) => {
-    track(name, props);
+    trackCustomerEvent(name, props);
   };
   stub.trackPurchase = (value, currency, orderId, items) => {
-    track('purchase', {
+    trackCustomerEvent('purchase', {
       value_native: value,
       currency,
       order_id: orderId,
@@ -244,10 +272,10 @@ function replayCall(call: unknown): void {
   const [method, ...args] = call as [string, ...unknown[]];
   switch (method) {
     case 'track':
-      track(args[0] as string, args[1] as Record<string, unknown> | undefined);
+      trackCustomerEvent(args[0] as string, args[1] as Record<string, unknown> | undefined);
       break;
     case 'trackPurchase':
-      track('purchase', {
+      trackCustomerEvent('purchase', {
         value_native: args[0] as number,
         currency: args[1] as string,
         order_id: args[2] as string,
@@ -287,6 +315,18 @@ export function track(name: string, props?: Record<string, unknown>): void {
     return;
   }
   emitTracked(name, props, ts);
+}
+
+/**
+ * Customer-fired event entry point (`_testa.track` / `Analytica.pushEvent` /
+ * `trackPurchase`). Emits through the normal `track` pipe AND runs custom-goal
+ * matching, so a customer event whose name equals a `custom` goal's `action`
+ * records a conversion. Internal emits (experiment_view, page_view, session_start,
+ * conversion) call `track` directly and are NOT matched against goals.
+ */
+export function trackCustomerEvent(name: string, props?: Record<string, unknown>): void {
+  track(name, props);
+  _goals?.handleCustomEvent(name, props);
 }
 
 /**
@@ -531,8 +571,19 @@ export function runExperimentCycle(): void {
   }
   _activeTeardowns = [];
 
+  // Tear down last cycle's goal listeners; start a fresh controller for this
+  // pass (SPA re-entry otherwise leaves stale click handlers attached).
+  _goals?.teardown();
+  _goals = createGoalController({ track });
+
+  // Fire session_start (new session only) + page_view for this URL. These are
+  // the raw events goals match against at query time; page_view also re-fires
+  // on every SPA navigation.
+  fireLifecycleEvents();
+
   const ctx = buildEvalContext();
   const stats = { matched: 0, excluded: 0 };
+  const assigned: AssignedExperiment[] = [];
 
   for (const expConfig of project.experiments) {
     if (expConfig.status !== 'active') continue;
@@ -558,6 +609,21 @@ export function runExperimentCycle(): void {
 
     const variation = expConfig.variations.find((v) => v.variation_id === result.variationId);
     const redirectChange = variation?.changes.find((c) => c.type === 'redirect');
+
+    // GTM real-time exposure signal (3.3.3 `trackLead`) + collect this
+    // experiment's goals for wiring after the loop. Pushed even when the
+    // variation will redirect, since the page is about to change.
+    pushLeadToDataLayer({
+      experimentId: expConfig.experiment_id,
+      ...(expConfig.title !== undefined ? { experimentName: expConfig.title } : {}),
+      variationId: result.variationId,
+      ...(variation?.name !== undefined ? { variationName: variation.name } : {}),
+    });
+    assigned.push({
+      experimentId: expConfig.experiment_id,
+      variationId: result.variationId,
+      goals: expConfig.goals,
+    });
 
     // SRM fix: when this variation will redirect, ship the experiment_view
     // SYNCHRONOUSLY via sendBeacon BEFORE we lose the page. The normal
@@ -620,12 +686,32 @@ export function runExperimentCycle(): void {
     });
   }
 
+  // Wire click + page_view goals for every assigned experiment. Click goals
+  // attach listeners only to their configured selectors (no click autocapture);
+  // page_view goals fire immediately if the current URL matches; custom goals
+  // wait for a matching customer event via `trackCustomerEvent`.
+  _goals.register(assigned, ctx.page.url);
+
   pushDebug({
     ts: Date.now(),
     url: location.href,
     matchedExperiments: stats.matched,
     excludedExperiments: stats.excluded,
   });
+}
+
+/**
+ * Fire the per-cycle behavioural events: `session_start` once per new session
+ * (detected by the absence of the session cookie BEFORE any track mints one),
+ * then `page_view` for the current URL. `page_view` re-fires on every SPA
+ * navigation; `session_start` does not (the cookie exists by then).
+ */
+function fireLifecycleEvents(): void {
+  const hadSession = Boolean(readValue(SESSION_ID_COOKIE));
+  if (!hadSession) {
+    track('session_start');
+  }
+  track('page_view');
 }
 
 // ─── EvalContext construction ─────────────────────────────────────────────
@@ -794,8 +880,11 @@ export function __resetForTests(): void {
   _consentReplayUnsub?.();
   _consentReplayUnsub = null;
   _alreadyHydrated = false;
+  _previewActive = false;
   _spaUninstall?.();
   _spaUninstall = null;
+  _goals?.teardown();
+  _goals = null;
   for (const t of _activeTeardowns) {
     try {
       t();

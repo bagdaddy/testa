@@ -15,6 +15,31 @@
 
 const TESTA_PARAM_RE = /^_testa_/;
 
+/**
+ * Mode-aware match gate for the redirect engine, mirroring legacy `urlMatches`
+ * (crobot script.js ~637-656). The rewrite `url_match_type` also selects how
+ * `from_url` is matched against the current URL:
+ *   - `contains` → substring test on the raw href.
+ *   - `regex`    → `from_url` compiled as a `RegExp`, tested against the href.
+ *   - `exact` / `query` → canonical exact/glob/regex matching via `matchesUrl`.
+ */
+export function matchesForMode(
+  currentUrl: string,
+  fromUrl: string,
+  mode: 'exact' | 'contains' | 'query' | 'regex',
+): boolean {
+  if (!fromUrl) return false;
+  if (mode === 'contains') return currentUrl.includes(fromUrl);
+  if (mode === 'regex') {
+    try {
+      return new RegExp(fromUrl).test(currentUrl);
+    } catch {
+      return false;
+    }
+  }
+  return matchesUrl(currentUrl, fromUrl);
+}
+
 export function matchesUrl(currentUrl: string, pattern: string): boolean {
   if (!pattern) return false;
   if (pattern.startsWith('regex:')) {
