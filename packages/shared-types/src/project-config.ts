@@ -30,6 +30,8 @@ export interface ProjectConfig {
 
 export interface ExperimentConfig {
   experiment_id: number;
+  /** Human-readable name (3.3.3 `e.title`); surfaced in the GTM dataLayer push. */
+  title?: string;
   status: 'active' | 'paused' | 'archived';
   rules: ExperimentRule[];
   variations: VariationConfig[];
@@ -51,6 +53,8 @@ export interface ExperimentRule {
 
 export interface VariationConfig {
   variation_id: number;
+  /** Human-readable name (3.3.3 `VariationName`); surfaced in the GTM dataLayer push. */
+  name?: string;
   weight: number;
   /** Visual/code changes the runtime applies for this variation; opaque to the type system. */
   changes: VariationChange[];
@@ -61,8 +65,28 @@ export type VariationChange =
   | { type: 'html'; selector: string; html: string }
   | { type: 'text'; selector: string; text: string }
   | { type: 'js'; code: string }
-  | { type: 'redirect'; from_url: string; to_url: string }
-  | { type: 'attribute'; selector: string; name: string; value: string };
+  | {
+      type: 'redirect';
+      from_url: string;
+      to_url: string;
+      /**
+       * How `to_url` is derived from the current URL (3.3.3 `createRedirectUrl`):
+       * - `exact` (default): navigate to `to_url`, merging current query params.
+       * - `contains`: string-replace `from_url` → `to_url` inside the current href.
+       * - `query`: keep current URL, set query params parsed from `to_url`.
+       * - `regex`: treat `from_url` as a regex; expand `$1..$n` backrefs into `to_url`.
+       */
+      url_match_type?: 'exact' | 'contains' | 'query' | 'regex';
+    }
+  | { type: 'attribute'; selector: string; name: string; value: string }
+  /** 3.3.3 `hide_element` — sets `display:none` on matched elements. */
+  | { type: 'hide'; selector: string }
+  /** 3.3.3 `append_html` — `insertAdjacentHTML('beforeend')`. */
+  | { type: 'append'; selector: string; html: string }
+  /** 3.3.3 `prepend_html` — `insertAdjacentHTML('afterbegin')`. */
+  | { type: 'prepend'; selector: string; html: string }
+  /** 3.3.3 `move_element_append`/`move_element_prepend` — relocate matched els under `target`. */
+  | { type: 'move'; selector: string; target: string; position: 'append' | 'prepend' };
 
 export interface GoalConfig {
   goal_id: number;
