@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { pushConversionToDataLayer, pushLeadToDataLayer, variationName } from '../data-layer.ts';
+import { pushLeadToDataLayer, variationName } from '../data-layer.ts';
 
 interface DlWindow {
   dataLayer?: Array<Record<string, unknown>> | undefined;
@@ -44,19 +44,5 @@ describe('pushLeadToDataLayer', () => {
     const entry = (window as unknown as DlWindow).dataLayer?.[0];
     expect(entry?.ExperimentName).toBe('');
     expect(entry?.VariationName).toBe('Control');
-  });
-});
-
-describe('pushConversionToDataLayer', () => {
-  it('pushes the analytica_conversion shape onto an existing dataLayer', () => {
-    (window as unknown as DlWindow).dataLayer = [{ event: 'prior' }];
-    pushConversionToDataLayer({ goalId: 42, goalName: 'Signup' });
-    const dl = (window as unknown as DlWindow).dataLayer;
-    expect(dl?.[1]).toEqual({ event: 'analytica_conversion', goalName: 'Signup', goalId: 42 });
-  });
-
-  it('defaults goalName when absent', () => {
-    pushConversionToDataLayer({ goalId: 42 });
-    expect((window as unknown as DlWindow).dataLayer?.[0]?.goalName).toBe('');
   });
 });

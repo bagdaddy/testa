@@ -1,18 +1,17 @@
 /**
- * GTM `window.dataLayer` push — 3.3.3 parity for `trackLead` / `trackConversion`.
+ * GTM `window.dataLayer` push — 3.3.3 parity for `trackLead` (exposure).
  *
- * Many customers wire their GTM triggers to the events 3.6 pushed onto
- * `window.dataLayer`, so we keep pushing the exact same shapes:
- *   - `{ event: 'Analytica', ExperimentId, ExperimentName, VariationId, VariationName }`
- *     on exposure (a visitor is bucketed into a variation), and
- *   - `{ event: 'analytica_conversion', goalName, goalId }` on a goal match.
+ * Many customers wire their GTM triggers to the exposure event 3.6 pushed onto
+ * `window.dataLayer`, so we keep pushing the exact same shape:
+ *   `{ event: 'Analytica', ExperimentId, ExperimentName, VariationId, VariationName }`
+ * when a visitor is bucketed into a variation. This is the real-time segmentation
+ * signal for GTM; ClickHouse still receives the raw `experiment_view` event.
  *
- * This is the *real-time* signal for GTM; ClickHouse still receives the raw
- * events for query-time attribution. The two are complementary — GTM can't
- * wait for an analytics query, so the pixel matches goals client-side and
- * pushes here the instant they fire.
+ * We deliberately do NOT push a conversion event (`analytica_conversion`) — it
+ * was redundant. Conversions flow to ClickHouse via the `conversion` event, and
+ * customers build GTM conversion triggers on their own fired events.
  *
- * Reference: 3.3.3 `script.js` `trackLead` (~921) and `trackConversion` (~940).
+ * Reference: 3.3.3 `script.js` `trackLead` (~921).
  */
 
 /** 3.3.3 `CONTROL_IDENTIFIER` — variation 0 is always the control. */
@@ -56,19 +55,5 @@ export function pushLeadToDataLayer(params: {
     ExperimentName: params.experimentName ?? '',
     VariationId: params.variationId,
     VariationName: variationName(params.variationId, params.variationName),
-  });
-}
-
-/**
- * Push a conversion record onto the GTM dataLayer. 3.3.3 `trackConversion`.
- * No-op when there's no `window`.
- */
-export function pushConversionToDataLayer(params: { goalId: number; goalName?: string }): void {
-  const dl = ensureDataLayer();
-  if (!dl) return;
-  dl.push({
-    event: 'analytica_conversion',
-    goalName: params.goalName ?? '',
-    goalId: params.goalId,
   });
 }

@@ -13,10 +13,10 @@
  *                   emits a matching custom event (via `_testa.track` /
  *                   `Analytica.pushEvent`).
  *
- * On any match we do two things (both are 3.3.3 behaviour):
- *   1. `track('conversion', { goal_id, experiment_id, variation_id, ... })`
- *      → the durable outbox → ClickHouse (query-time attribution source).
- *   2. push `analytica_conversion` onto the GTM dataLayer (real-time signal).
+ * On any match we emit `track('conversion', { goal_id, experiment_id,
+ * variation_id, ... })` → the durable outbox → ClickHouse, where attribution is
+ * a query-time join on visitor_id. (We do NOT push to the GTM dataLayer on
+ * conversion — only on exposure; see legacy/data-layer.ts.)
  *
  * The controller is fed the assigned experiments each experiment cycle and
  * returns a teardown that removes listeners + pending retry timers, so a SPA
@@ -24,7 +24,6 @@
  */
 
 import type { GoalConfig, MatchType } from '@testa-platform/shared-types';
-import { pushConversionToDataLayer } from '../legacy/data-layer.ts';
 
 /** 3.3.3 `CLICK_SELECTOR_TIMEOUT` / `CLICK_SELECTOR_MAX_TRIES`. */
 const CLICK_RETRY_MS = 100;
@@ -76,15 +75,15 @@ function fireConversion(
   deps: GoalDeps,
   data?: Record<string, unknown>,
 ): void {
+  // Conversion goes to ClickHouse via the outbox; attribution is a query-time
+  // join on visitor_id. We do NOT push `analytica_conversion` to the GTM
+  // dataLayer — the customer builds GTM triggers on their own fired events, so
+  // that push was redundant. (Only the exposure `Analytica` push is kept.)
   deps.track('conversion', {
     goal_id: goal.goal_id,
     experiment_id: exp.experimentId,
     variation_id: exp.variationId,
     ...(data ?? {}),
-  });
-  pushConversionToDataLayer({
-    goalId: goal.goal_id,
-    ...(goal.name ? { goalName: goal.name } : {}),
   });
 }
 

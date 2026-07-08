@@ -2,17 +2,8 @@ import type { GoalConfig } from '@testa-platform/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AssignedExperiment, createGoalController, urlMatchesGoal } from '../goals.ts';
 
-interface DlWindow {
-  dataLayer?: Array<Record<string, unknown>>;
-}
-
-function dataLayer(): Array<Record<string, unknown>> {
-  return (window as unknown as DlWindow).dataLayer ?? [];
-}
-
 beforeEach(() => {
   document.body.innerHTML = '';
-  (window as unknown as DlWindow).dataLayer = [];
 });
 
 afterEach(() => {
@@ -56,11 +47,6 @@ describe('createGoalController — page_view goals', () => {
       goal_id: 11,
       experiment_id: 7,
       variation_id: 2,
-    });
-    expect(dataLayer()).toContainEqual({
-      event: 'analytica_conversion',
-      goalName: 'Thanks',
-      goalId: 11,
     });
   });
 
