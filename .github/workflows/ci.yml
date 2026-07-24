@@ -88,7 +88,7 @@ jobs:
         image: clickhouse/clickhouse-server:24.10-alpine
         ports: ['8123:8123', '9000:9000']
         options: >-
-          --health-cmd "wget --quiet --spider http://localhost:8123/ping" --health-interval 5s --health-timeout 3s --health-retries 20
+          --health-cmd "wget --quiet --spider http://localhost:8123/ping" --health-interval 5s --health-timeout 3s --health-retries 30 --health-start-period 30s
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
