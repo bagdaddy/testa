@@ -87,8 +87,8 @@ jobs:
       clickhouse:
         image: clickhouse/clickhouse-server:24.10-alpine
         ports: ['8123:8123', '9000:9000']
-        options: >-
-          --health-cmd "wget --quiet --spider http://localhost:8123/ping" --health-interval 5s --health-timeout 3s --health-retries 30 --health-start-period 30s
+        # No Docker health check — GHA will start steps as soon as the container
+        # is Running; the explicit wait step below polls until /ping responds.
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -98,6 +98,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
       - run: pnpm install --frozen-lockfile
+      - name: Wait for ClickHouse
+        run: timeout 300 bash -c 'until wget -q -O- http://localhost:8123/ping 2>/dev/null | grep -q Ok; do sleep 3; done'
       - name: Apply CH migrations
         run: pnpm --filter @testa-platform/collector migrate
         env:
