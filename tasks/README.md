@@ -28,7 +28,7 @@ Foundation work was done in the seed commits before this task system existed. Se
 | [1.4](./phase-1/1.4-ingest-route.md) | `POST /_ingest` route + HMAC + Zod | done | 1.3 |
 | [1.5](./phase-1/1.5-consumer-worker.md) | Consumer worker (XREADGROUP → CH INSERT) | done | 1.1, 1.2, 1.3 |
 | [1.6](./phase-1/1.6-fx-rates.md) | FX rates sync + dictionary endpoint | done | 1.3 |
-| [1.7](./phase-1/1.7-tests.md) | Vitest coverage for ingest, consumer, replay | pending | 1.4, 1.5 |
+| [1.7](./phase-1/1.7-tests.md) | Vitest coverage for ingest, consumer, replay | in_progress | 1.4, 1.5 |
 
 ## Phase 2 — Edge worker
 
