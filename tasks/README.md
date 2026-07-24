@@ -41,7 +41,7 @@ Foundation work was done in the seed commits before this task system existed. Se
 | [2.5](./phase-2/2.5-batch-buffer-do.md) | DurableObject batch buffer | done | — |
 | [2.6](./phase-2/2.6-ingest-forward.md) | HMAC sign + POST to collector | done | 2.5 |
 | [2.7](./phase-2/2.7-serve-pixel.md) | GET /projects/:slug.js — KV serve | done | — |
-| [2.8](./phase-2/2.8-tests.md) | miniflare + Vitest coverage | pending | 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7 |
+| [2.8](./phase-2/2.8-tests.md) | miniflare + Vitest coverage | in_progress | 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7 |
 | [2.9](./phase-2/2.9-staging-deploy.md) | wrangler deploy to staging — **PAUSE** for human | pending | 2.8 |
 
 ## Phase 3 — Tracker pixel 4.0
