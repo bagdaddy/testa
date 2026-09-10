@@ -1,6 +1,6 @@
 {
   "name": "@testa-soft/dom",
-  "version": "1.3.8",
+  "version": "1.4.0",
   "type": "module",
   "description": "Browser render layer for experiments: crobot-native DOM variation apply (change_html/css/hide_element/append_html/prepend_html/move_element_*) + anti-flicker shielding. Pairs with @testa-soft/experiment-core.",
   "license": "UNLICENSED",
@@ -13,9 +13,7 @@
       "default": "./src/index.ts"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "publishConfig": {
     "access": "public",
     "tag": "latest",

@@ -22,7 +22,14 @@ const SESSION_END = NOW + 1800;
 const cookie = (variation: number): string => `77.${variation}.0.${SESSION_END}`;
 
 /** A funnel-shaped split URL: the rule matches the control page only. */
-function funnelConfig(over: { rule?: string; to?: string } = {}): ProjectConfig {
+function funnelConfig(
+  over: {
+    rule?: string;
+    from?: string;
+    to?: string;
+    mode?: 'exact' | 'contains' | 'query' | 'regex';
+  } = {},
+): ProjectConfig {
   return {
     project_id: 1,
     slug: 'acme',
@@ -46,9 +53,9 @@ function funnelConfig(over: { rule?: string; to?: string } = {}): ProjectConfig 
             changes: [
               {
                 type: 'redirect',
-                from_url: 'https://acme.com/question/male/1',
+                from_url: over.from ?? 'https://acme.com/question/male/1',
                 to_url: over.to ?? 'https://acme.com/question/female/1',
-                url_match_type: 'exact',
+                url_match_type: over.mode ?? 'exact',
               },
             ],
           },
@@ -109,6 +116,25 @@ describe('resolveExposures', () => {
         SESSION_END + 1,
       ),
     ).toEqual([]);
+  });
+
+  // A regex split URL builds its destination from `to_url` as a TEMPLATE
+  // (`/q/$1/female`), so it never compares equal to the URL the visitor is
+  // actually on. Before the comparison followed `url_match_type`, that dropped
+  // the WHOLE variant arm out of `variation_applied` — control kept reporting,
+  // the variant reported nothing, and the split looked broken downstream.
+  it('reports the variant at a REGEX-templated destination', () => {
+    const config = funnelConfig({
+      rule: '/question/male',
+      from: 'https://acme\\.com/question/male/(\\d+)',
+      to: '/question/female/$1',
+      mode: 'regex',
+    });
+    expect(resolveExposures(config, cookie(1), 'https://acme.com/question/female/12', NOW)).toEqual(
+      [{ experimentId: 77, variationId: 1, title: 'Question funnel' }],
+    );
+    // …and still nothing on a page the template does not describe.
+    expect(resolveExposures(config, cookie(1), 'https://acme.com/about', NOW)).toEqual([]);
   });
 
   it('reports nothing without an assignment', () => {

@@ -8,6 +8,7 @@ import { ASSIGNMENT_COOKIE, UUID_BACKUP_COOKIE, UUID_COOKIE } from '@testa-soft/
 import { NextRequest, NextResponse } from 'next/server.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createTestaProxy } from '../middleware.ts';
+import { setVisitorId } from '../visitor-id.ts';
 import { splitUrlConfig } from './helpers.ts';
 
 function request(
@@ -681,28 +682,359 @@ describe('createTestaProxy', () => {
     });
   });
 
-  describe('the proxy never reports an exposure', () => {
-    // Counting is the browser's, fired alongside `variation_applied`. The server
-    // can only recognise a visitor whose id round-trips in a cookie, so for a
-    // client that will not store one it would mint a fresh id and report a fresh
-    // visitor on every request — one human, many leads. See `tracking`.
-    it('makes no /api/leads call, even for a visitor it can name', async () => {
-      const calls: string[] = [];
+  describe('the proxy reports the exposure at assignment', () => {
+    /** Collect every fetch the proxy makes, with its parsed JSON body. */
+    function captureFetch(): Array<{ url: string; body: Record<string, unknown> }> {
+      const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
       vi.stubGlobal(
         'fetch',
-        vi.fn(async (url: string) => {
-          calls.push(String(url));
+        vi.fn(async (url: string, init?: RequestInit) => {
+          let body: Record<string, unknown> = {};
+          try {
+            body = JSON.parse(String(init?.body ?? '{}'));
+          } catch {
+            body = {};
+          }
+          calls.push({ url: String(url), body });
+          return new Response('{}', { status: 200 });
+        }),
+      );
+      return calls;
+    }
+
+    const leads = (calls: Array<{ url: string; body: Record<string, unknown> }>) =>
+      calls.filter((c) => c.url.includes('/api/leads'));
+
+    // The counting point is what makes the observed split equal the configured
+    // one. Both arms are counted here, at the same instant; anything later puts
+    // the variant an extra 307 + page load deeper into the funnel than control
+    // and undercounts it — which reads downstream as SRM.
+    it('counts BOTH arms at assignment — the variant before its 307', async () => {
+      const proxy = createTestaProxy({ projectSlug: 'acme', config: splitUrlConfig() });
+      const arm = async (assignment: string) => {
+        const calls = captureFetch();
+        const res = await proxy(
+          request('https://acme.com/pricing', {
+            cookie: `${UUID_COOKIE}=known-visitor; ${ASSIGNMENT_COOKIE}=${assignment}`,
+          }),
+        );
+        const posted = leads(calls);
+        vi.unstubAllGlobals();
+        return { status: res.status, posted };
+      };
+
+      // Variant: the lead is posted even though the response is a 307 and this
+      // page is about to be torn down — the browser never gets a chance here.
+      const variant = await arm('101.2.0.0');
+      expect(variant.status).toBe(307);
+      expect(variant.posted).toHaveLength(1);
+      expect(variant.posted[0]?.body).toMatchObject({
+        experiment: 101,
+        variation: 2,
+        uuid: 'known-visitor',
+        url: 'https://acme.com/pricing',
+        source: 'proxy:document',
+      });
+
+      // Control: same instant, same depth in the funnel. Equal counting points
+      // on both arms is what keeps the observed split honest.
+      const control = await arm('101.1.0.0');
+      expect(control.status).not.toBe(307);
+      expect(control.posted).toHaveLength(1);
+      expect(control.posted[0]?.body).toMatchObject({ experiment: 101, variation: 1 });
+    });
+
+    it("forwards the VISITOR user agent and IP, not the runtime's", async () => {
+      const headers: Array<Record<string, string>> = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (String(url).includes('/api/leads')) {
+            headers.push(Object.fromEntries(new Headers(init?.headers).entries()));
+          }
           return new Response('{}', { status: 200 });
         }),
       );
       const proxy = createTestaProxy({ projectSlug: 'acme', config: splitUrlConfig() });
       await proxy(
         new NextRequest(new URL('https://acme.com/pricing'), {
+          headers: new Headers({
+            cookie: `${UUID_COOKIE}=known-visitor`,
+            'user-agent': 'Mozilla/5.0 (Macintosh)',
+            'x-forwarded-for': '203.0.113.9, 70.41.3.18',
+          }),
+        }),
+      );
+      expect(headers[0]?.['user-agent']).toBe('Mozilla/5.0 (Macintosh)');
+      expect(headers[0]?.['x-forwarded-for']).toBe('203.0.113.9');
+      vi.unstubAllGlobals();
+    });
+
+    it('does not count bots or speculative loads', async () => {
+      const calls = captureFetch();
+      const proxy = createTestaProxy({ projectSlug: 'acme', config: splitUrlConfig() });
+      await proxy(
+        new NextRequest(new URL('https://acme.com/pricing'), {
+          headers: new Headers({ 'user-agent': 'Googlebot/2.1' }),
+        }),
+      );
+      await proxy(
+        new NextRequest(new URL('https://acme.com/pricing'), {
+          method: 'HEAD',
           headers: new Headers({ cookie: `${UUID_COOKIE}=known-visitor` }),
         }),
       );
-      expect(calls.filter((u) => u.includes('/api/leads'))).toEqual([]);
+      expect(leads(calls)).toEqual([]);
       vi.unstubAllGlobals();
+    });
+
+    it('stays silent when `tracking: false` hands counting to the browser', async () => {
+      const calls = captureFetch();
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+      });
+      await proxy(
+        new NextRequest(new URL('https://acme.com/pricing'), {
+          headers: new Headers({ cookie: `${UUID_COOKIE}=known-visitor` }),
+        }),
+      );
+      expect(leads(calls)).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe('caller-supplied visitor id', () => {
+    /** Cookies the response actually sets, name -> value. */
+    function setCookies(res: NextResponse): Record<string, string> {
+      const out: Record<string, string> = {};
+      for (const c of res.cookies.getAll()) out[c.name] = c.value;
+      return out;
+    }
+
+    it('buckets on the caller id and mirrors it into BOTH cookies', async () => {
+      // The readable copy matters as much as the backup: the browser half reads
+      // `_testa_uuid` from document.cookie and no-ops on an empty id, so
+      // writing only the HttpOnly copy leaves client-side tracking dead.
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: () => 'their-own-id',
+      });
+      let seen: string | undefined;
+      const withHook = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: () => 'their-own-id',
+        onVariationAssigned: (event) => {
+          seen = event.visitorId;
+        },
+      });
+      const res = await proxy(request('https://acme.com/pricing'));
+      await withHook(request('https://acme.com/pricing'));
+
+      expect(seen).toBe('their-own-id');
+      const cookies = setCookies(res);
+      expect(cookies[UUID_COOKIE]).toBe('their-own-id');
+      expect(cookies[UUID_BACKUP_COOKIE]).toBe('their-own-id');
+    });
+
+    it('SEEDS a new visitor but never re-keys a returning one', async () => {
+      // Re-keying moves a returning visitor to a different variation
+      // mid-experiment — possibly while they are standing on the page their old
+      // variation sent them to. The existing id always wins.
+      let seen: string | undefined;
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: () => 'their-own-id',
+        onVariationAssigned: (event) => {
+          seen = event.visitorId;
+        },
+      });
+      await proxy(request('https://acme.com/pricing', { cookie: `${UUID_COOKIE}=already-here` }));
+      expect(seen).toBe('already-here');
+    });
+
+    it('keeps a returning visitor known only by the HttpOnly backup', async () => {
+      let seen: string | undefined;
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: () => 'their-own-id',
+        onVariationAssigned: (event) => {
+          seen = event.visitorId;
+        },
+      });
+      await proxy(
+        request('https://acme.com/pricing', { cookie: `${UUID_BACKUP_COOKIE}=survived` }),
+      );
+      expect(seen).toBe('survived');
+    });
+
+    it('accepts a plain string as well as a resolver', async () => {
+      let seen: string | undefined;
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: 'static-id',
+        onVariationAssigned: (event) => {
+          seen = event.visitorId;
+        },
+      });
+      await proxy(request('https://acme.com/pricing'));
+      expect(seen).toBe('static-id');
+    });
+
+    it('receives the request, so the id can come off a cookie or header', async () => {
+      let seen: string | undefined;
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: (req) => req.cookies.get('my_visitor_id')?.value ?? null,
+        onVariationAssigned: (event) => {
+          seen = event.visitorId;
+        },
+      });
+      await proxy(request('https://acme.com/pricing', { cookie: 'my_visitor_id=from-cookie' }));
+      expect(seen).toBe('from-cookie');
+    });
+
+    it.each([
+      ['returns null', () => null],
+      ['returns undefined', () => undefined],
+      ['returns empty string', () => ''],
+      [
+        'throws',
+        () => {
+          throw new Error('identity service down');
+        },
+      ],
+    ])('falls back to minting when the resolver %s', async (_label, resolver) => {
+      let seen: string | undefined;
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: resolver as () => string | null | undefined,
+        onVariationAssigned: (event) => {
+          seen = event.visitorId;
+        },
+      });
+      await proxy(request('https://acme.com/pricing'));
+      // A minted uuid, not a crash and not an empty id.
+      expect(seen).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('keeps assignment stable across requests for the same caller id', async () => {
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        visitorId: () => 'stable-visitor',
+      });
+      const first = await proxy(request('https://acme.com/pricing'));
+      const second = await proxy(request('https://acme.com/pricing'));
+      // Same id in, same bucketing out — the property the contract depends on.
+      expect(first.status).toBe(second.status);
+    });
+  });
+
+  describe('setVisitorId', () => {
+    /** Capture the id the engine actually bucketed on. */
+    function proxyCapturing(seen: { id?: string }, options = {}) {
+      return createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        onVariationAssigned: (event) => {
+          seen.id = event.visitorId;
+        },
+        ...options,
+      });
+    }
+
+    it('seeds a NEW visitor, and is ignored for a returning one', async () => {
+      const seen: { id?: string } = {};
+      const proxy = proxyCapturing(seen);
+      const req = request('https://acme.com/pricing', { cookie: `${UUID_COOKIE}=already-here` });
+      setVisitorId(req, 'too-late');
+      await proxy(req);
+      expect(seen.id).toBe('already-here');
+    });
+
+    it('uses an id handed over for THIS request', async () => {
+      const seen: { id?: string } = {};
+      const proxy = proxyCapturing(seen);
+      const req = request('https://acme.com/pricing');
+      setVisitorId(req, 'awaited-id');
+      await proxy(req);
+      expect(seen.id).toBe('awaited-id');
+    });
+
+    it('supports an id that had to be awaited', async () => {
+      const seen: { id?: string } = {};
+      const proxy = proxyCapturing(seen);
+      const req = request('https://acme.com/pricing');
+      // The `visitorId` option is called synchronously inside the decision
+      // path and cannot do this — the whole reason this helper exists.
+      setVisitorId(req, await Promise.resolve('from-session-lookup'));
+      await proxy(req);
+      expect(seen.id).toBe('from-session-lookup');
+    });
+
+    it('beats the visitorId option (both are only seeds)', async () => {
+      const seen: { id?: string } = {};
+      const proxy = proxyCapturing(seen, { visitorId: () => 'from-option' });
+      const req = request('https://acme.com/pricing');
+      setVisitorId(req, 'from-setter');
+      await proxy(req);
+      expect(seen.id).toBe('from-setter');
+    });
+
+    it('does NOT leak between concurrent requests', async () => {
+      // The reason this is keyed on the request and not module state: one
+      // isolate serves many visitors at once, and a parked value would assign
+      // one visitor another's variation.
+      const ids: string[] = [];
+      const proxy = createTestaProxy({
+        projectSlug: 'acme',
+        config: splitUrlConfig(),
+        tracking: false,
+        onVariationAssigned: (event) => {
+          ids.push(event.visitorId);
+        },
+      });
+      const reqs = ['alice', 'bob', 'carol'].map((name) => {
+        const r = request('https://acme.com/pricing');
+        setVisitorId(r, name);
+        return r;
+      });
+      await Promise.all(reqs.map((r) => proxy(r)));
+      expect(ids.sort()).toEqual(['alice', 'bob', 'carol']);
+    });
+
+    it('ignores an empty id and falls through', async () => {
+      const seen: { id?: string } = {};
+      const proxy = proxyCapturing(seen, { visitorId: () => 'from-option' });
+      const req = request('https://acme.com/pricing');
+      setVisitorId(req, '');
+      await proxy(req);
+      expect(seen.id).toBe('from-option');
+    });
+
+    it("a request with nothing set still gets Testa's own id", async () => {
+      const seen: { id?: string } = {};
+      const proxy = proxyCapturing(seen);
+      await proxy(request('https://acme.com/pricing'));
+      expect(seen.id).toMatch(/^[0-9a-f-]{36}$/);
     });
   });
 

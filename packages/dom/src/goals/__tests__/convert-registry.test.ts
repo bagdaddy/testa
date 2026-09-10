@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGoalController } from '../controller.ts';
 import { emitLegacyConversion, resetConversionGuard } from '../convert.ts';
-import { installGoalGlobals, pushEvent, registerGoalController, resetGoalRegistry } from '../registry.ts';
+import {
+  installGoalGlobals,
+  pushEvent,
+  registerGoalController,
+  resetGoalRegistry,
+} from '../registry.ts';
 
 describe('emitLegacyConversion', () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
@@ -77,7 +82,13 @@ describe('goal registry + pushEvent', () => {
     const track = vi.fn();
     const controller = createGoalController({ track });
     controller.register(
-      [{ experimentId: 1, variationId: 1, goals: [{ goal_id: 5, type: 'custom', action: 'signup' }] }],
+      [
+        {
+          experimentId: 1,
+          variationId: 1,
+          goals: [{ goal_id: 5, type: 'custom', action: 'signup' }],
+        },
+      ],
       'https://t.example',
     );
 
@@ -91,18 +102,28 @@ describe('goal registry + pushEvent', () => {
   });
 
   it('installGoalGlobals exposes window.testa.pushEvent + window.Analytica.pushEvent without clobbering', () => {
-    const w = window as unknown as {
-      testa?: { pushEvent?: unknown };
-      Analytica?: { pushEvent?: unknown; spa?: number };
-    };
+    // Indexed access, so assigning here does not narrow the read back below —
+    // `installGoalGlobals` mutates these and TypeScript cannot see that.
+    const w = window as unknown as Record<
+      string,
+      { pushEvent?: unknown; spa?: number } | undefined
+    >;
     w.testa = undefined;
-    w.Analytica = { spa: 1, pushEvent: 'existing' as unknown as undefined };
+    w.Analytica = { spa: 1, pushEvent: 'existing' };
 
     installGoalGlobals();
 
-    expect(typeof w.testa?.pushEvent).toBe('function');
+    // Read back through a FRESH reference. Assigning `w.testa = undefined`
+    // above narrows that binding to `undefined` for the rest of the block, so
+    // reading through it makes the property access `never` — even though
+    // `installGoalGlobals` has since populated it.
+    const after = window as unknown as Record<
+      string,
+      { pushEvent?: unknown; spa?: number } | undefined
+    >;
+    expect(typeof after.testa?.pushEvent).toBe('function');
     // A pre-existing pushEvent (legacy pixel) is left untouched.
-    expect(w.Analytica?.pushEvent).toBe('existing');
-    expect(w.Analytica?.spa).toBe(1);
+    expect(after.Analytica?.pushEvent).toBe('existing');
+    expect(after.Analytica?.spa).toBe(1);
   });
 });

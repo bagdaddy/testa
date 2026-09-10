@@ -49,6 +49,7 @@ import { ASSIGNMENT_COOKIE, type CookieStore } from './cookie-store.ts';
 import { CROSS_DOMAIN_PARAM, decodeCrossDomain } from './cross-domain.ts';
 import { shuffleForVisitor } from './order.ts';
 import { ELIGIBLE_PENDING_VARIATION_ID, parsePacked } from './packed-cookie.ts';
+import { isAtRedirectDestination as isAtDestinationForChange } from './redirect/at-destination.ts';
 import { type RedirectChange, resolveRedirectDestination } from './redirect/decide.ts';
 import { matchesForMode } from './redirect/match.ts';
 import {
@@ -424,11 +425,8 @@ export function resolveExposures(
 /**
  * Is `url` the destination of the redirect this visitor's variation carries?
  *
- * Host + path only, query ignored — the destination usually arrives carrying
- * the source's query params (see `merge-params.ts`), so comparing the full href
- * would never match. A `to_url` that is a template rather than a URL (a regex
- * replacement with `$1`) simply doesn't compare equal, which is the same
- * outcome as before this check existed.
+ * Delegates the comparison to `redirect/at-destination.ts`, which follows the
+ * variation's own `url_match_type` — the same mode that BUILT the destination.
  */
 function isAtRedirectDestination(
   experiment: ExperimentConfig,
@@ -439,19 +437,7 @@ function isAtRedirectDestination(
     (v: VariationConfig) => v.variation_id === variationId,
   );
   const change = variation ? redirectChangeOf(variation) : undefined;
-  if (!change?.to_url) return false;
-  try {
-    const destination = new URL(change.to_url, url);
-    const current = new URL(url);
-    if (destination.host.toLowerCase() !== current.host.toLowerCase()) return false;
-    return trimTrailingSlash(destination.pathname) === trimTrailingSlash(current.pathname);
-  } catch {
-    return false;
-  }
-}
-
-function trimTrailingSlash(pathname: string): string {
-  return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+  return change ? isAtDestinationForChange(change, url) : false;
 }
 
 /** An experiment the visitor is assigned to whose goals should be live. */

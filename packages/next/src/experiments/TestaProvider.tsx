@@ -37,6 +37,7 @@ import {
   type Teardown,
   applyVariation,
   emitVariationApplied,
+  emitVariationAssigned,
   installTestaGlobal,
 } from '@testa-soft/dom';
 import { ASSIGNMENT_COOKIE, UUID_COOKIE, resolveExposures } from '@testa-soft/experiment-core';
@@ -227,9 +228,19 @@ export function TestaProvider(props: TestaProviderProps): null {
       );
       revealShield();
 
-      // Fire `variation_applied` for every experiment the visitor is exposed to on
+      // Fire the client events for every experiment the visitor is exposed to on
       // this page (split-URL, DOM, and control alike) — once per load, deduped in
       // the bus. This is the client event surface + the GTM dataLayer push.
+      //
+      // BOTH events fire here, in order. The proxy already bucketed this visitor
+      // server-side, so `variation_assigned` is a MIRROR of that decision — the
+      // client's first sight of it — not a second bucketing. Without it a
+      // browser-side listener sees `variation_assigned` only on the pageviews
+      // the proxy did not decide (a cold instance, `decisions: 'client'`), which
+      // is the sparser and less representative half of the traffic. The
+      // authoritative pre-redirect assignment signal remains the proxy's
+      // `onVariationAssigned` hook: on a split-URL variant this page IS the
+      // destination, so by the time it runs the 307 has already happened.
       installTestaGlobal();
       const uuid = readClientCookie(UUID_COOKIE) ?? '';
       const nowSec = Math.floor(Date.now() / 1000);
@@ -243,8 +254,10 @@ export function TestaProvider(props: TestaProviderProps): null {
           ...(e.title ? { title: e.title } : {}),
           url: currentUrl,
         };
+        emitVariationAssigned(payload);
         emitVariationApplied(payload);
-        // COUNT HERE when the proxy isn't counting. The browser is the only
+        // COUNT HERE too — the proxy counts at assignment, and crobot dedups on
+        // `(experiment_id, uuid)` so the overlap collapses. The browser is the only
         // place the visitor id can be recovered once a cookie stops sticking
         // (the store falls back to its storage mirror), so on cookie-hostile
         // traffic this reports ONE visitor where the server would report one

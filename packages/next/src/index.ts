@@ -42,6 +42,7 @@ export {
   pushEvent,
 } from '@testa-soft/dom';
 export type { VariationEvent, VariationHandler, Unsubscribe, TestaGlobal } from '@testa-soft/dom';
+export { setVisitorId } from './visitor-id.ts';
 export { emitExposure } from './tracking.ts';
 export type { ExposurePayload } from './tracking.ts';
 export { runExperiments } from '@testa-soft/experiment-core';

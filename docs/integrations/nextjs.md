@@ -601,6 +601,118 @@ from the client payload — document them per surface:
 > `experimentId` / `variationId` / `visitorId`. Same concepts, different keys —
 > reach for the right ones on each side.
 
+`ctx.request` is the incoming `NextRequest`, for hooks that need to read a
+header or cookie of their own.
+
+### One visitor id across Testa and your analytics
+
+An assignment reported from the edge is only useful if it lands on the **same
+person** your analytics already knows. Testa's own `_testa_uuid` is shared with
+nothing, so an event sent under it creates a user that exists nowhere else, and
+the exposure never joins to the behaviour it is meant to explain.
+
+**Give Testa the id you already use.** Either form works:
+
+```ts
+// Derivable from the request — a cookie, a header. One line.
+createTestaProxy({
+  projectId: '3fa85f64e1c2b',
+  visitorId: (req) => req.cookies.get('my_visitor_id')?.value ?? null,
+})
+```
+
+```ts
+// Or hand it over per request, when resolving it means awaiting something.
+import { createTestaProxy, setVisitorId } from '@testa-soft/next'
+
+const testa = createTestaProxy({ projectId: '3fa85f64e1c2b' })
+
+export async function proxy(req: NextRequest, event: NextFetchEvent) {
+  setVisitorId(req, await mySessionLookup(req))
+  return testa(req, event)
+}
+```
+
+The id is mirrored into `_testa_uuid` and its `HttpOnly` backup, so the
+browser-side pieces (goal conversions, client exposures, the cold fallback)
+keep working — they read that cookie.
+
+> **A supplied id SEEDS a visitor, it never re-keys one.** A visitor who
+> already has a `_testa_uuid` keeps it, whatever you pass. Bucketing is
+> `hash(visitorId:experimentId)`, so re-keying would move a returning visitor
+> to a different variation mid-experiment — possibly while they are standing on
+> the page their old variation sent them to. Your id can churn for reasons that
+> have nothing to do with experiments (a logout, a rotation, a consent reset),
+> and none of them are reasons to re-bucket anyone.
+>
+> The corollary: **adopt an existing id before minting a new one.** If your own
+> cookie is missing but `_testa_uuid` is present, reuse it — minting blindly
+> leaves Testa on the old id and your analytics on the new one.
+
+> **Anything you `await` before delegating blocks the redirect.** The `307` is
+> not produced until the proxy runs, so a slow lookup there is latency on every
+> experiment pageview — the very latency the server-side redirect exists to
+> avoid. Resolve the id from the request when you can; treat a network call as
+> a real cost.
+
+### Sending the assignment to PostHog
+
+With one shared id, reporting is a plain POST under `event.visitorId`:
+
+```ts
+export const proxy = createTestaProxy({
+  projectId: '3fa85f64e1c2b',
+  visitorId: (req) => req.cookies.get('my_visitor_id')?.value ?? null,
+
+  onVariationAssigned: (event, ctx) => {
+    ctx.waitUntil(
+      fetch(`${process.env.POSTHOG_HOST}/i/v0/e/`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          api_key: process.env.NEXT_PUBLIC_POSTHOG_KEY,
+          event: 'experiment_assigned',
+          distinct_id: event.visitorId,
+          properties: {
+            experiment_id: event.experimentId,
+            variation_id: event.variationId,
+            experiment_title: event.title,
+            redirected: event.redirected,
+            $current_url: event.url,
+          },
+          timestamp: new Date().toISOString(),
+        }),
+      }),
+    )
+  },
+})
+```
+
+This fires **before** the split-URL `307`. The request is server-to-server, so
+the browser navigating away cannot cancel it; `ctx.waitUntil` keeps the runtime
+from tearing the invocation down first.
+
+> **Use the capture HTTP API, not `posthog-node`.** The Node client buffers
+> events and flushes them on a timer, and a serverless/edge invocation is gone
+> long before that timer fires — the events are simply lost. A plain `fetch`
+> inside `ctx.waitUntil` has no such gap.
+
+> **Do not try to merge identities afterwards.** Reporting under Testa's id and
+> reconciling later with `posthog.alias()` does not work: PostHog has
+> deprecated `alias` in favour of `identify` and will not merge an anonymous
+> person with it — posthog-js keeps `$user_state: "anonymous"` and the records
+> stay separate. Reading PostHog's own id from its cookie server-side is
+> correct whenever the cookie exists, but on a visitor's first request
+> posthog-js has never run, so there is no id to borrow at the moment the edge
+> must decide — which is exactly the visitor an entry-point experiment cares
+> about. Sharing one id from the start has neither hole.
+
+Analyse it as a **trend broken down by `variation_id`**. That works on any
+PostHog version. Wiring it to PostHog's own Experiments product means giving it
+an exposure event it recognises, which depends on your PostHog version — check
+before relying on it.
+
+
 ### Which surface should I use?
 
 The two surfaces are **independent**. Client-side (`variation_applied`) is right
@@ -609,6 +721,36 @@ SDK already loaded on the page. Server-side (`onVariationAssigned`) is right for
 destinations you'd rather not trust to the client — a warehouse, a server-side
 collector, a webhook — and it fires even if the visitor has JavaScript disabled. Wire up whichever you
 need; wire up both if you want the exposure in two places.
+
+**On a split-URL experiment, prefer the server hook.** The two surfaces do not
+fire at the same depth in the funnel: `onVariationAssigned` fires for both arms
+at the instant of bucketing, while `variation_applied` fires for the control on
+its own page and for the variant only after a `307` **and** a second page load.
+Count from the client alone and every visitor who abandons in between is counted
+for control and not for variant — which shows up as a sample ratio mismatch that
+is an artefact of the measurement, not of the bucketing.
+
+### Sample ratio mismatch (SRM) on a split URL
+
+If the observed split does not match the configured one, check the counting
+point before suspecting the bucketing (which is a deterministic hash of
+`visitor_id:experiment_id` and is separately unit-tested):
+
+| Cause | What you see | Fix |
+| --- | --- | --- |
+| Counting only in the browser | Variant consistently **under** control | Leave `tracking` on (default) so the proxy counts at assignment |
+| Custom tracking wired to `variation_applied` only | Variant under-reported in **your** analytics, correct in Testa | Send from `onVariationAssigned` instead |
+| Visitors losing `_testa_uuid` | Both arms inflated, split roughly even | Inspect `ctx.cookies` — see below |
+| `decisions: 'client'` or a permanently cold instance | Client decides; server hook never fires | Use the client `variation_assigned` event too |
+| Assignments and sessions on different people in your analytics | Split looks fine in Testa, funnels broken in your tool | Share one id — `visitorId` / `setVisitorId`, never a post-hoc merge |
+
+`ctx.cookies` (a `VisitorCookieState`) is there for the third row. It reports
+whether the request carried `_testa_uuid`, the `HttpOnly` backup, an assignment,
+**and how many other cookies came with it** — which separates "cookies do not
+work for this client at all" (a script or crawler: expect `otherCookies: 0`)
+from "cookies work fine and ours is the one missing" (a real browser mid-session
+carrying a cart and a consent record). The second population is the one that
+gets re-bucketed and can land in the other group.
 
 ---
 
@@ -652,9 +794,10 @@ Returns a Next.js proxy/middleware function. Import from `@testa-soft/next`.
 | `cookieDomain`       | `string`                                         | —                                | Explicit cookie `Domain` for cross-subdomain tracking (e.g. `.example.com`).         |
 | `discoverRootDomain` | `boolean`                                        | `false`                          | Auto-derive the registrable domain for cookies.                                      |
 | `legacyCookiesEnabled` | `boolean`                                      | `false`                          | **Temporary, cutover only.** Adopt a returning visitor's legacy 3.x pixel cookies (`_testa_exp_<id>` etc.) before deciding, so a live experiment doesn't re-bucket them. Set the same value on `<TestaProvider>`. |
-| `tracking`           | `boolean`                                        | `true`                           | Emit exposures so results populate. `false` for redirects-only, or if a pixel owns tracking. |
-| `trackingHost`       | `string`                                         | `https://new.testa-soft.tech`    | Host for exposure tracking (`{trackingHost}/api/leads`). Also via `TESTA_TRACKING_HOST`. |
-| `onVariationAssigned`| `(event, ctx) => void \| Promise<void>`         | —                                | **Server-side** hook per assignment. `ctx.waitUntil(promise)` keeps async work alive past the response — never delays it. Guard on `event.firstAssignment` for once-per-visitor. |
+| `visitorId`          | `string \| ((req) => string \| null)`           | —                                | Use YOUR visitor id instead of Testa's `_testa_uuid`, so assignments land on the person your analytics already knows. A **seed**: a visitor who already has an id keeps it. Must be stable per visitor — a rotating id re-buckets. |
+| `onVariationAssigned`| `(event, ctx) => void \| Promise<void>`         | —                                | **Server-side** hook per assignment, fired BEFORE any split-URL `307`. `ctx.waitUntil(promise)` keeps async work alive past the response — never delays it. `ctx.request` is the `NextRequest` (read your own analytics cookie off it). Guard on `event.firstAssignment` for once-per-visitor. |
+| `tracking`           | `boolean`                                       | `true`                           | Report the exposure to Testa at assignment — the only point that counts both arms at the same depth in the funnel. Set `false` to leave counting to the browser. |
+| `trackingHost`       | `string`                                        | `TESTA_TRACKING_HOST` \| SDK default | Base URL for `/api/leads` and the `/log` beacon. |
 | `skipPaths`          | `(string \| RegExp)[]`                           | —                                | Extra paths passed through untouched, on top of the built-in filter (`/_next/*`, `/api/*`, `/.well-known/*`, asset extensions). Strings are segment-aligned prefixes; RegExps test the pathname. |
 | `handler`            | `(req, event) => Response \| null \| undefined \| Promise<…>` | —                   | Your own middleware logic, composed inside the proxy — see [Composing with your own logic](#already-have-middleware-composing-with-your-own-logic). |
 
@@ -663,6 +806,27 @@ Exported constants: `DEFAULT_CONFIG_HOST`, `DEFAULT_TRACKING_HOST`,
 (outer-wrapper composition), `shouldBypassRequest(pathname, skipPaths?)`.
 Exported types: `TestaProxy`, `TestaProxyOptions`, `TestaHandler`, `SkipPath`,
 `VariationHookContext`, `VariationAppliedEvent` (the server hook's `event`).
+
+### `setVisitorId(request, visitorId)` — `@testa-soft/next`
+
+Use your own visitor id for **this request**, for ids that must be awaited (a
+session lookup, a KV read) — the `visitorId` option is a synchronous resolver
+and cannot await.
+
+```ts
+export async function proxy(req: NextRequest, event: NextFetchEvent) {
+  setVisitorId(req, await mySessionLookup(req))
+  return testa(req, event)
+}
+```
+
+Keyed on the request object, not module state: one isolate serves many requests
+concurrently, so a parked module-level value would be read by the wrong visitor
+and assign them someone else's variation. Pass the same request instance you
+hand to the proxy — building a new `NextRequest` produces a different key.
+
+A **seed**, like the `visitorId` option: a visitor who already has a
+`_testa_uuid` keeps it. An empty id is ignored.
 
 ### Client event bus — `@testa-soft/next`
 

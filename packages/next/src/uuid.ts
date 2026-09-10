@@ -14,6 +14,10 @@
  * is `hash(visitorId:experimentId)`: a visitor whose assignment cookie is gone
  * but whose id survived is put back in the SAME variation.
  *
+ * A caller can supply the id instead of us minting one (`setVisitorId`, or the
+ * `visitorId` proxy option). It seeds a NEW visitor only — an id already on the
+ * request always wins, so a returning visitor is never re-keyed.
+ *
  * The readable copy stays authoritative when both exist and disagree. It is
  * what the client engine and the pixel write, and adopting the older server
  * copy would move an active visitor between variations mid-session — worse than
@@ -29,9 +33,19 @@ import {
 
 /**
  * Return this visitor's id — existing, restored from the server-owned copy, or
- * freshly minted — and keep both cookies in sync.
+ * newly established — and keep both cookies in sync.
+ *
+ * `seed` is a caller-supplied id (`setVisitorId`, or the `visitorId` proxy
+ * option). It SEEDS a visitor who has none yet; it never replaces an id already
+ * on the request. That direction is deliberate: bucketing is
+ * `hash(visitorId:experimentId)`, so re-keying a returning visitor moves them
+ * to a different variation mid-experiment — possibly while they are standing on
+ * the page their old variation sent them to. A caller's id can churn for
+ * reasons that have nothing to do with us (a logout, a rotation, a consent
+ * reset), and none of them are reasons to re-bucket anyone. Without a seed we
+ * mint, exactly as before.
  */
-export function ensureVisitorId(store: CookieStore): string {
+export function ensureVisitorId(store: CookieStore, seed?: string): string {
   const readable = store.get(UUID_COOKIE);
   const backup = store.get(UUID_BACKUP_COOKIE);
 
@@ -48,7 +62,7 @@ export function ensureVisitorId(store: CookieStore): string {
     return backup;
   }
 
-  const uuid = crypto.randomUUID();
+  const uuid = seed || crypto.randomUUID();
   store.set(UUID_COOKIE, uuid, { maxAgeSec: UUID_TTL_SEC });
   writeBackup(store, uuid);
   return uuid;

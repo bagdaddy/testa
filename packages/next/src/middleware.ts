@@ -48,8 +48,10 @@ import {
 import { stripFrameworkParams } from './soft-nav/framework-params.ts';
 import { computePrefetchRedirect } from './soft-nav/prefetch-guard.ts';
 import { isPrefetchRequest } from './soft-nav/rsc-redirect.ts';
+import { emitExposure } from './tracking.ts';
 import { type PublicHostOption, resolvePublicUrlDetailed } from './url-resolver.ts';
 import { ensureVisitorId } from './uuid.ts';
+import { getSuppliedVisitorId } from './visitor-id.ts';
 
 export type { VariationAppliedEvent };
 
@@ -194,22 +196,74 @@ export interface TestaProxyOptions extends ConfigSource {
     ctx: VariationHookContext,
   ) => void | Promise<void>;
   /**
-   * @deprecated No longer read. The proxy does not report exposures.
+   * Report the exposure to Testa AT ASSIGNMENT — the moment the visitor is
+   * bucketed, before any split-URL 307 leaves. Default true.
    *
-   * Counting is the browser's, fired alongside `variation_applied` — the same
-   * moment the first-party hooks see. The server cannot do it correctly: it can
-   * only recognise a visitor whose id round-trips in a cookie, so for a client
-   * that will not store one it mints a fresh id and reports a fresh visitor on
-   * every single request, turning one human into many. The browser recovers the
-   * real id from its storage mirror and reports once. Counting where the
-   * visitor can actually be identified is what makes the numbers reconcile with
-   * first-party analytics.
+   * THIS IS THE ONLY POINT THAT COUNTS BOTH ARMS AT THE SAME INSTANT, which is
+   * what keeps the observed split equal to the configured one. Counting from
+   * the browser instead puts the two arms at different depths in the funnel: a
+   * control visitor is counted when their page renders, a variant visitor only
+   * after a 307 AND a second page load, so everyone who abandons in between is
+   * counted for control and not for variant. That gap is a sample ratio
+   * mismatch produced entirely by where the count is taken.
    *
-   * Configure reporting on `<TestaProvider tracking={…} trackingHost={…} />`.
+   * The browser keeps counting too (`<TestaProvider tracking/>`), and the two
+   * do not double up: crobot dedups on `(experiment_id, uuid)`. The overlap is
+   * deliberate — the browser is the only side that can still name a visitor
+   * whose cookie stopped sticking (it recovers the id from its storage mirror),
+   * so it covers exactly the traffic the server gets wrong, plus every pageview
+   * the proxy never decided (a cold instance, `decisions: 'client'`).
+   *
+   * The cost of counting here is the converse: a client that will not store a
+   * cookie is minted a fresh id on every request and reported as a fresh
+   * visitor each time. `skipBots` (default true) removes the bulk of that
+   * traffic before it reaches this point, and `ctx.cookies` on
+   * `onVariationAssigned` is there to measure the remainder on live traffic.
+   * Set false to leave counting entirely to the browser.
    */
   tracking?: boolean;
-  /** @deprecated No longer read — see `tracking`. Set it on `<TestaProvider/>`. */
+  /**
+   * Base URL for exposure reporting (`/api/leads`) and the `/log` diagnostic
+   * beacon. Defaults to `TESTA_TRACKING_HOST`, then the SDK's tracking host.
+   */
   trackingHost?: string;
+  /**
+   * Use YOUR visitor id instead of Testa's own `_testa_uuid`.
+   *
+   * By default the proxy mints and persists its own id, which no other tool
+   * shares. That is the root of every identity-stitching problem: an assignment
+   * reported from the edge lands on a person your analytics has never seen, and
+   * the browser session that follows lands on a different one. Merging them
+   * afterwards is unreliable — PostHog, for instance, has deprecated `alias`
+   * and will not merge an anonymous person with it at all.
+   *
+   * Supplying the id your analytics already keys on removes the problem instead
+   * of patching it: both sides are the same person from the FIRST request, with
+   * nothing to stitch — including the first-touch visitor who lands straight on
+   * an experiment page, the one case merging can never fix (their analytics id
+   * does not exist yet at the moment the server has to decide).
+   *
+   * The resolved id is mirrored into `_testa_uuid` AND the `HttpOnly` backup, so
+   * the browser half (goal conversions, client-side exposures, the cold
+   * fallback) keeps working — it reads the readable cookie.
+   *
+   * CONTRACT — the id MUST be stable per visitor and long-lived. Bucketing is
+   * `hash(visitorId:experimentId)`, so an id that rotates re-buckets the
+   * visitor on every rotation: a fresh coin flip each time. That corrupts
+   * ASSIGNMENT, not just counting, and is a worse failure than the one this
+   * option exists to fix. A session-scoped id is not usable here.
+   *
+   * Return `null`/`undefined` (or throw — errors are swallowed) to fall back to
+   * Testa's own minting for that request.
+   *
+   * ```ts
+   * createTestaProxy({
+   *   projectId: '…',
+   *   visitorId: (req) => req.cookies.get('my_visitor_id')?.value ?? null,
+   * })
+   * ```
+   */
+  visitorId?: string | ((req: NextRequest) => string | null | undefined);
   /**
    * Extra paths the proxy must pass through untouched, on top of the built-in
    * filter (`/_next/*`, `/api/*`, `/.well-known/*`, static-asset extensions).
@@ -250,9 +304,10 @@ export function createTestaProxy(options: TestaProxyOptions): TestaProxy {
   }
   const configClient = new ConfigClient(resolveConfigSource(options, projectId));
   const secure = options.secureCookies ?? true;
-  // Only the `/log` diagnostic beacon posts from the server now; exposures are
-  // the browser's. `trackingHost` is still honoured so both land on one host.
-  const diagnosticHost = (
+  // One host for both server-side posts: the `/api/leads` exposure and the
+  // `/log` diagnostic beacon.
+  const trackingEnabled = options.tracking !== false;
+  const trackingHost = (
     options.trackingHost ??
     readEnv('TESTA_TRACKING_HOST') ??
     DEFAULT_TRACKING_HOST
@@ -276,7 +331,7 @@ export function createTestaProxy(options: TestaProxyOptions): TestaProxy {
   const beacon = (trace: unknown, event?: NextFetchEvent): void => {
     if (!debugEnabled) return;
     beaconSeq += 1;
-    const pending = sendDebugLog(diagnosticHost, trace, `${Date.now()}-${beaconSeq}`);
+    const pending = sendDebugLog(trackingHost, trace, `${Date.now()}-${beaconSeq}`);
     if (event?.waitUntil) event.waitUntil(pending);
     else void pending;
   };
@@ -285,7 +340,7 @@ export function createTestaProxy(options: TestaProxyOptions): TestaProxy {
   const logDecision = (decision: DecisionLog, event?: NextFetchEvent): void => {
     if (!decisionLogging) return;
     beaconSeq += 1;
-    const pending = sendDecisionLog(diagnosticHost, decision, `${Date.now()}-${beaconSeq}`);
+    const pending = sendDecisionLog(trackingHost, decision, `${Date.now()}-${beaconSeq}`);
     if (event?.waitUntil) event.waitUntil(pending);
     else void pending;
   };
@@ -447,7 +502,7 @@ export function createTestaProxy(options: TestaProxyOptions): TestaProxy {
       return res;
     }
 
-    const visitorId = ensureVisitorId(store);
+    const visitorId = resolveVisitorId(options.visitorId, req, store);
 
     // TEMPORARY (legacy cutover) — carry a returning 3.x visitor's assignment
     // into the packed cookie BEFORE the engine reads it, so `assign()`'s
@@ -488,8 +543,15 @@ export function createTestaProxy(options: TestaProxyOptions): TestaProxy {
       if (emitDebug) urlTrace = endUrlTrace();
     }
 
+    // ASSIGNMENT-TIME reporting — both the customer's hook and Testa's own
+    // exposure, fired here so they land BEFORE the split-URL 307 below. See
+    // `tracking` for why the count has to be taken at this instant.
+    const source = navigation ? 'proxy:document' : 'proxy:data';
     for (const applied of result.applied) {
-      fireVariationAssigned(options.onVariationAssigned, applied, event, cookieState);
+      fireVariationAssigned(options.onVariationAssigned, applied, event, cookieState, req);
+      if (trackingEnabled && config.project_id != null) {
+        reportExposure(trackingHost, config.project_id, applied, source, req, event);
+      }
     }
 
     if (result.redirectTo) {
@@ -736,6 +798,21 @@ export interface VariationHookContext {
   waitUntil: (promise: Promise<unknown>) => void;
   /** What the request said about this visitor's cookies. See {@link VisitorCookieState}. */
   cookies: VisitorCookieState;
+  /**
+   * The incoming request — read it to key your event to the SAME person your
+   * browser-side analytics knows.
+   *
+   * `event.visitorId` is Testa's id, and no other tool shares it. A PostHog or
+   * GA event sent from here under that id is a DIFFERENT user from the one
+   * posthog-js/gtag reports in the browser, so the assignment never joins to
+   * the behaviour it is supposed to explain. Their own id is on this request:
+   * `ctx.request.cookies.get('ph_<project_api_key>_posthog')` holds a JSON blob
+   * with `distinct_id`, `_ga` holds the GA client id. Send under that instead.
+   *
+   * Also the place to read the visitor's UA, IP, and geo headers — a fetch made
+   * from here otherwise reports the runtime's, not the visitor's.
+   */
+  request: NextRequest;
 }
 
 /**
@@ -800,6 +877,7 @@ function fireVariationAssigned(
   event: VariationAppliedEvent,
   fetchEvent: NextFetchEvent | undefined,
   cookies: VisitorCookieState,
+  request: NextRequest,
 ): void {
   if (!listener) return;
   const waitUntil = (promise: Promise<unknown>): void => {
@@ -807,12 +885,90 @@ function fireVariationAssigned(
     else void promise.catch(() => undefined);
   };
   try {
-    const r = listener(event, { waitUntil, cookies });
+    const r = listener(event, { waitUntil, cookies, request });
     // If the hook itself returned a promise, keep the worker alive for it too.
     if (r && typeof (r as Promise<void>).then === 'function') waitUntil(r as Promise<void>);
   } catch {
     // never break the request on a hook error
   }
+}
+
+/**
+ * POST the exposure to Testa for one assignment, keeping it alive past the
+ * response with `waitUntil`.
+ *
+ * Called at assignment time — for a split-URL variant that is BEFORE the 307,
+ * the only moment both arms are counted at the same depth in the funnel. The
+ * request is server-to-server, so the browser navigating away cannot cancel it;
+ * `waitUntil` is what stops the runtime tearing the invocation down first.
+ *
+ * The visitor's UA and IP ride along because this fetch is made BY THE SERVER:
+ * without them every server-side exposure is attributed to the runtime's own
+ * user agent and the deployment's egress IP, and device/geo reporting is wrong
+ * for the entire server-decided population.
+ */
+function reportExposure(
+  trackingHost: string,
+  projectId: number,
+  applied: VariationAppliedEvent,
+  source: string,
+  req: NextRequest,
+  fetchEvent: NextFetchEvent | undefined,
+): void {
+  if (!applied.visitorId) return;
+  const pending = emitExposure(
+    trackingHost,
+    {
+      project_id: projectId,
+      experiment: applied.experimentId,
+      variation: applied.variationId,
+      uuid: applied.visitorId,
+      ...(applied.title ? { title: applied.title } : {}),
+      url: applied.url,
+      source,
+    },
+    { userAgent: req.headers.get('user-agent'), clientIp: clientIp(req) },
+  );
+  if (fetchEvent?.waitUntil) fetchEvent.waitUntil(pending);
+}
+
+/**
+ * The visitor id for this request.
+ *
+ * A caller-supplied id (`setVisitorId(req, …)` first, then the `visitorId`
+ * option) is a SEED for a visitor who has none yet — `ensureVisitorId` still
+ * prefers an id already on the request, so a returning visitor is never
+ * re-keyed and never re-bucketed.
+ *
+ * A resolver that throws or returns nothing falls back to minting rather than
+ * failing the request — an identity source of the customer's own is exactly the
+ * kind of thing that can be briefly unavailable, and an unexperimented pageview
+ * is a far better outcome than a 500.
+ */
+function resolveVisitorId(
+  option: TestaProxyOptions['visitorId'],
+  req: NextRequest,
+  store: NextCookieStore,
+): string {
+  // `setVisitorId(req, …)` first: it is the only source that can carry an id
+  // the caller had to await, so it is the most deliberate one available.
+  let seed: string | null | undefined = getSuppliedVisitorId(req);
+  if (!seed) {
+    try {
+      seed = typeof option === 'function' ? option(req) : option;
+    } catch {
+      seed = undefined;
+    }
+  }
+  // A SEED, not an override — a visitor who already has an id keeps it.
+  return ensureVisitorId(store, seed || undefined);
+}
+
+/** The visitor's IP as the edge saw it — first hop of `x-forwarded-for`. */
+function clientIp(req: NextRequest): string | null {
+  const forwarded = req.headers.get('x-forwarded-for');
+  if (forwarded) return (forwarded.split(',')[0] ?? '').trim() || null;
+  return req.headers.get('x-real-ip');
 }
 
 /** Best-effort ISO country from common edge geo headers (Vercel / Cloudflare). */
